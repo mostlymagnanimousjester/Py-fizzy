@@ -14,7 +14,7 @@ python -m venv .venv
 
 Open http://127.0.0.1:47621 . The first visit can create an account in `instance/fizzy.sqlite3`. Sign-in codes are shown on the next page because nothing is emailed.
 
-On a board, `J` opens the jump menu, `K` search, `P` pins, and `N` the inbox. Arrows move between columns and cards, Enter opens a card, `[` sends it to Not Now, `]` marks it Done, and `M` assigns it to you. On a card, `D` completes it, `E` edits the title, `T` tags, `A` assigns, Shift+`G` toggles gold, and Esc or Left goes back. Shortcuts stay quiet while you are typing.
+On a board, `C` adds a card, `J` opens the jump menu, `K` search, `P` pins, and `N` the inbox. Arrows move between columns and cards, Enter opens a card, `[` sends it to Not Now, `]` marks it Done, and `M` assigns it to you. On a card, `D` completes it, `E` edits the title, `T` tags, `A` assigns, Shift+`G` toggles gold, and Esc or Left goes back. Shortcuts stay quiet while you are typing.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

@@ -279,7 +279,7 @@ def inject():
     if user and account:
         urls = Urls(request.host_url.rstrip("/"), account["external_account_id"])
         for card in store.pins_for_user(conn(), user)[:8]:
-            tray_pins.append({"number": card["number"], "title": card["title"] or "Untitled"})
+            tray_pins.append(card_view(conn(), card, user["id"]))
         tray_notes = [notification_json(conn(), row, urls) for row in store.notifications_for(conn(), user, 8, 0)]
     return {
         "csrf_token": session.get("_csrf", ""),
@@ -832,13 +832,14 @@ def card_create(slug, board_id):
     tag_titles = payload.get("tag_titles") or []
     if isinstance(tag_titles, str):
         tag_titles = [part.strip() for part in tag_titles.split(",") if part.strip()]
+    naming = not wants_json() and not (payload.get("title") or "").strip() and request.headers.get("X-Fizzy-Fragment") != "card"
     card = store.create_card(
         conn(),
         g.user,
         board,
         title=payload.get("title"),
         description=payload.get("description"),
-        status=status,
+        status="drafted" if naming else status,
         column_id=payload.get("column_id") or None,
         created_at=payload.get("created_at"),
         last_active_at=payload.get("last_active_at"),
@@ -864,6 +865,8 @@ def card_create(slug, board_id):
         return json_body(card_json(conn(), fresh, urls, detailed=True), 201, urls("cards", fresh["number"]) + ".json")
     if request.headers.get("X-Fizzy-Fragment") == "card":
         return _card_fragment(fresh, True)
+    if fresh["status"] == "drafted":
+        return redirect(f"{g.slug}/cards/{fresh['number']}")
     return redirect(f"{g.slug}/boards/{board['id']}")
 
 

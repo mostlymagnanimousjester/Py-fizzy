@@ -1,0 +1,10 @@
+<div class="board-tools card">
+  <form method="post" action="{{ slug }}/boards/{{ board.id }}/cards" data-add-card>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn--link">
+      <span class="icon icon--add show-on-touch"></span>
+      <span>Add a card</span>
+      <kbd class="hide-on-touch">C</kbd>
+    </button>
+  </form>
+</div>

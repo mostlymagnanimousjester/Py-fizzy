@@ -909,6 +909,8 @@ def update_card(conn, user: dict, card: dict, *, title=None, description=None, s
             raise invalid({"status": ["must be drafted or published"]})
         if status != card["status"]:
             cols["status"] = status
+    if status == "published" and card["status"] != "published" and not (cols.get("title") or card.get("title")):
+        cols["title"] = "Untitled"
     if last_active_at is not None:
         cols["last_active_at"] = parse_dt(last_active_at) or utcnow()
     if (cols or description is not None or tag_titles is not None) and "last_active_at" not in cols:

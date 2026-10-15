@@ -84,7 +84,7 @@ def create_app(config: dict | None = None) -> Flask:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; img-src 'self' data:; style-src 'self'; "
+            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
             "script-src 'self'; form-action 'self'; frame-ancestors 'none'"
         )
         return response

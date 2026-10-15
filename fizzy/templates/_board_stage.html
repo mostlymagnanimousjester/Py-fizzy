@@ -7,7 +7,7 @@
   </div>
 </div>
 {% else %}
-<div class="card-columns hide-scrollbar" data-board="{{ board.id }}">
+<div class="card-columns hide-scrollbar" data-board="{{ board.id }}" data-controller="drag-and-drop">
   <div class="card-columns__left">
     {% with lane="not_now", title="Not Now", cards=lanes.not_now, collapsed=true, color="var(--color-card-complete)", column=false %}
       {% include "_column.html" %}

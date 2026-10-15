@@ -36,7 +36,12 @@
   </details>
   <input class="filter__terms input txt-x-small" name="q" value="{{ request.args.get('q', '') }}" placeholder="Filter these cards… [F]" data-hotkey-target="filter" aria-keyshortcuts="F" aria-label="Find">
 </form>
-<div id="board-stage">
-  {% include "_board_stage.html" %}
+<div id="cards_container">
+  {% if current_user and not public_key and not filtering %}
+    {% include "_add_card.html" %}
+  {% endif %}
+  <div id="board-stage">
+    {% include "_board_stage.html" %}
+  </div>
 </div>
 {% endblock %}

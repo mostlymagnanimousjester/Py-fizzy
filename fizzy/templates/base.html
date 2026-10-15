@@ -70,6 +70,7 @@
                 <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/cards?creation=today">Added today</a></li>
                 <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/cards?closure=today">Done today</a></li>
                 <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/">Activity</a></li>
+                <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/my/pins">Pinned</a></li>
                 <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/cards">All cards</a></li>
                 <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/users">People</a></li>
                 <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/account/settings">Settings</a></li>
@@ -123,12 +124,11 @@
       </div>
       <section class="tray tray--pins">
         <dialog class="tray__dialog" id="pins-tray">
-          {% for pin in tray_pins %}
-          <a class="tray__item" href="{{ slug }}/cards/{{ pin.number }}">#{{ pin.number }} {{ pin.title }}</a>
-          {% else %}
-          <p class="tray__empty">No pins yet.</p>
+          {% for view in tray_pins %}
+          <div class="tray__item tray__item--pin">
+            {% include "_card.html" %}
+          </div>
           {% endfor %}
-          <a class="tray__more" href="{{ slug }}/my/pins">All pins</a>
         </dialog>
         <button type="button" class="tray__toggle" data-hotkey="p" aria-controls="pins-tray" aria-label="Toggle pins stack">
           <div class="tray__toggle-btn txt-uppercase btn btn--reversed txt-x-small center full-width">
@@ -140,15 +140,21 @@
       <section class="tray tray--notifications">
         <dialog class="tray__dialog" id="notes-tray">
           {% for note in tray_notes %}
-          <a class="tray__item{% if not note.read %} unread{% endif %}" href="{{ slug }}/cards/{{ note.card.number if note.card else '' }}">{{ note.body }}</a>
-          {% else %}
-          <p class="tray__empty">Inbox is clear.</p>
+          <div class="tray__item tray__item--notification">
+            <a class="card card--notification{% if not note.read %} unread{% endif %}" href="{{ slug }}/cards/{{ note.card.number if note.card else '' }}" style="--card-color: var(--color-card-1)">{{ note.body }}</a>
+          </div>
           {% endfor %}
-          <form method="post" action="{{ slug }}/notifications/bulk_reading">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="btn btn--plain">Clear all</button>
-          </form>
-          <a class="tray__more" href="{{ slug }}/notifications">Open inbox</a>
+          <div class="tray__item tray__item--hat txt-x-small gap-half">
+            <div class="full-width">
+              <a class="btn borderless" href="{{ slug }}/notifications">
+                <span class="tray__old-notifications">See older items</span>
+              </a>
+            </div>
+            <form class="full-width" method="post" action="{{ slug }}/notifications/bulk_reading">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn borderless tray__clear-notifications">Clear all</button>
+            </form>
+          </div>
         </dialog>
         <button type="button" class="tray__toggle" data-hotkey="n" aria-controls="notes-tray" aria-label="Toggle notifications stack">
           <div class="tray__toggle-btn txt-uppercase btn btn--reversed txt-x-small center full-width">

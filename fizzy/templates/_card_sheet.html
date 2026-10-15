@@ -37,17 +37,14 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="_method" value="put">
             <h1 class="card__title">
-              <input class="card-field__title input input--textarea full-width borderless" name="card[title]" value="{{ view.card.title or '' }}" maxlength="255" aria-label="Title" data-hotkey-target="edit">
+              <label class="flex flex-column align-center">
+                <textarea class="card-field__title autoresize__textarea input input--textarea full-width borderless txt-align-start" name="card[title]" maxlength="255" rows="1" placeholder="Name it…" aria-label="Title" data-hotkey-target="edit">{{ view.card.title or '' }}</textarea>
+              </label>
             </h1>
-            <div class="card__description lexxy-content" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Description" data-plain="{{ view.description_text }}">{{ view.description_html|safe }}</div>
+            <div class="card__description lexxy-content" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Description" data-plain="{{ view.description_text }}" data-placeholder="Add some notes, context, pictures, or video about this…">{{ view.description_html|safe }}</div>
             <input type="hidden" name="card[description]" value="">
-            <div class="flex gap align-center">
-              <button type="submit" class="btn btn--link" data-hotkey="save">Save</button>
-              <label class="btn">Image <input type="file" name="card[image]" accept="image/jpeg,image/png,image/gif,image/webp"></label>
-              {% if view.image %}
-              <button type="submit" class="btn" formaction="{{ slug }}/cards/{{ view.card.number }}/image" name="_method" value="delete">Remove image</button>
-              {% endif %}
-            </div>
+            <button type="submit" class="for-screen-reader" data-hotkey="save">Save</button>
+            <label class="for-screen-reader">Image <input type="file" name="card[image]" accept="image/jpeg,image/png,image/gif,image/webp"></label>
           </form>
           <div class="steps">
             {% for step in view.steps %}
@@ -98,9 +95,12 @@
       </div>
       <footer class="card__footer">
         <div class="card__meta">
-          {% if view.creator %}<span class="avatar txt-x-small">{{ view.creator.name[:1] }}</span> <span>{{ view.creator.name }}</span>{% endif %}
-          <span>added {{ view.added_ago }}</span>
-          <span>updated {{ view.active_ago }}</span>
+          <div class="card__meta-avatars card__meta-avatars--author">
+            {% if view.creator %}<span class="avatar txt-x-small">{{ view.creator.name[:1] }}</span>{% endif %}
+          </div>
+          <span class="card__meta-text card__meta-text--added">{% if view.card.status == "drafted" %}Drafted{% else %}Added{% endif %} {{ view.added_ago }}</span>
+          {% if view.creator %}<span class="card__meta-text card__meta-text--author">By <strong>{{ view.creator.name }}</strong></span>{% endif %}
+          <span class="card__meta-text card__meta-text--updated overflow-ellipsis">Updated {{ view.active_ago }}</span>
         </div>
         <div class="card__assign flex gap wrap">
           {% for person in view.assignees %}
@@ -134,40 +134,66 @@
       {% endif %}
     </article>
   </div>
+  {% if view.card.status == "published" %}
   <div class="card-perma__actions card-perma__actions--right">
     <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/watch">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% if view.watching %}<input type="hidden" name="_method" value="delete">{% endif %}
-      <button type="submit" class="btn" data-hotkey="watch">{{ "Unwatch" if view.watching else "Watch" }} <kbd>⇧N</kbd></button>
+      <button type="submit" class="btn" data-hotkey="watch" title="{{ 'Unwatch' if view.watching else 'Watch' }}">
+        <span class="icon icon--{{ 'bell' if view.watching else 'bell-off' }}"></span>
+        <span class="for-screen-reader">{{ "Unwatch" if view.watching else "Watch" }}</span>
+      </button>
     </form>
     <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/pin">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% if view.pinned %}<input type="hidden" name="_method" value="delete">{% endif %}
-      <button type="submit" class="btn" data-hotkey="pin">{{ "Unpin" if view.pinned else "Pin" }} <kbd>⇧P</kbd></button>
+      <button type="submit" class="btn" data-hotkey="pin" title="{{ 'Unpin' if view.pinned else 'Pin' }}">
+        <span class="icon icon--{{ 'pinned' if view.pinned else 'unpinned' }}"></span>
+        <span class="for-screen-reader">{{ "Unpin" if view.pinned else "Pin" }}</span>
+      </button>
     </form>
-    {% if view.closed %}
+  </div>
+  {% endif %}
+  {% if view.card.status == "drafted" %}
+  <div class="card-perma__notch card-perma__notch--bottom flex-column">
+    <div class="card-perma__notch-new-card-buttons">
+      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="_method" value="put">
+        <input type="hidden" name="card[status]" value="published">
+        <button type="submit" class="btn">Create card</button>
+      </form>
+    </div>
+  </div>
+  {% elif view.closed %}
+  <div class="card-perma__closure-message flex gap-half justify-center">
+    <span>Completed.</span>
     <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/closure">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="_method" value="delete">
-      <button type="submit" class="btn">Undo</button>
+      <button type="submit" class="btn btn--plain borderless">Undo</button>
     </form>
-    {% else %}
-    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/closure">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit" class="btn" data-hotkey="done">Mark as Done <kbd>D</kbd></button>
-    </form>
-    {% if not view.postponed %}
-    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/not_now">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit" class="btn" data-hotkey="postpone">Not Now <kbd>[</kbd></button>
-    </form>
-    {% endif %}
-    {% endif %}
   </div>
-  {% if not view.closed and not view.postponed %}
+  {% else %}
   <div class="card-perma__notch card-perma__notch--bottom">
+    <div class="flex gap-half">
+      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/closure">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn" data-hotkey="done">Mark as Done <kbd class="txt-x-small">D</kbd></button>
+      </form>
+      {% if not view.postponed %}
+      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/not_now">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn btn--reversed" data-hotkey="postpone">Not Now <kbd class="txt-x-small">[</kbd></button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% if not view.postponed %}
+  <div class="card-perma__closure-message">
     <p>Moves to Not Now after {{ days }} quiet days if there’s no activity.</p>
   </div>
+  {% endif %}
   {% endif %}
 </section>
 <section class="comments panel panel--wide">

@@ -612,11 +612,9 @@
     }
     const tray = document.getElementById("pins-tray");
     if (tray && payload.pins) {
-      const more = slug + "/my/pins";
-      const items = payload.pins.map(function (pin) {
-        return '<a class="tray__item" href="' + slug + "/cards/" + pin.number + '">#' + escapeHtml(pin.number) + " " + escapeHtml(pin.title) + "</a>";
+      tray.innerHTML = payload.pins.map(function (pin) {
+        return '<div class="tray__item tray__item--pin"><a class="card" href="' + slug + "/cards/" + pin.number + '" style="--card-color: var(--color-card-2)"><div class="card__body"><h3 class="card__title">' + escapeHtml(pin.title) + "</h3></div></a></div>";
       }).join("");
-      tray.innerHTML = (items || '<p class="tray__empty">No pins yet.</p>') + '<a class="tray__more" href="' + more + '">All pins</a>';
     }
     if (payload.anchor) {
       const node = document.getElementById(String(payload.anchor).replace("#", ""));
@@ -885,6 +883,14 @@
       if (filter) {
         event.preventDefault();
         filter.focus();
+      }
+      return;
+    }
+    if (plain && (key === "c" || key === "C")) {
+      const composer = document.querySelector(".cards--maybe [data-add-card]");
+      if (composer) {
+        event.preventDefault();
+        composer.requestSubmit();
       }
       return;
     }
