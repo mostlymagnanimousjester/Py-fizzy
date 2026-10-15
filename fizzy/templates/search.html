@@ -6,8 +6,10 @@
   <p class="kicker">Search</p>
   <h1>{% if terms %}“{{ terms }}”{% else %}Search cards{% endif %}</h1>
   {% if cards %}
-  <div class="card-grid">
-    {% for view in cards %}{% include "_card.html" %}{% endfor %}
+  <div class="cards cards--grid cards-grid">
+    <div class="cards__list">
+      {% for view in cards %}{% include "_card.html" %}{% endfor %}
+    </div>
   </div>
   {% elif terms %}
   <p class="empty">No cards match that text or number.</p>

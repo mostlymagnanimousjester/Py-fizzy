@@ -1,223 +1,234 @@
-<section class="perma" style="--card-color: {{ view.color }}">
-  <div class="perma__side">
+<section class="card-perma{% if view.golden %} golden-effect{% endif %}" style="--card-color: {{ view.color }}">
+  <div class="card-perma__actions card-perma__actions--left">
     <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/goldness">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% if view.golden %}<input type="hidden" name="_method" value="delete">{% endif %}
-      <button type="submit" class="icon-button{% if view.golden %} is-on{% endif %}" data-hotkey="gold" title="Golden ticket">Gold <kbd>G</kbd></button>
+      <button type="submit" class="btn btn--circle{% if view.golden %} card-perma__star-input{% endif %}" data-hotkey="gold" title="Golden ticket">
+        <span class="icon icon--golden-ticket"></span>
+        <span class="for-screen-reader">Gold</span>
+        <kbd>G</kbd>
+      </button>
     </form>
   </div>
-  <div class="perma__card">
-    <article class="card card--perma{% if view.golden %} golden-effect{% endif %}{% if view.closed %} is-closed{% endif %}{% if view.postponed %} is-postponed{% endif %}">
+  <div class="card-perma__bg">
+    <article class="card{% if view.golden %} golden-effect{% endif %}{% if view.closed %} is-closed{% endif %}{% if view.postponed %} is-postponed{% endif %}">
       {% if view.image %}
       <div class="card__background"><img alt="" src="{{ slug }}/storage/{{ view.image.id }}"></div>
       {% endif %}
       <header class="card__header">
         <div class="card__board">
           <span class="card__id">{{ view.card.number }}</span>
-          <a class="card__board-name" href="{{ slug }}/boards/{{ board.id }}">{{ board.name }}</a>
+          <a class="card__board-name" href="{{ slug }}/boards/{{ board.id }}"><span class="overflow-ellipsis">{{ board.name }}</span></a>
         </div>
         <div class="card__tags">
-          {% for tag in view.tags %}<span>#{{ tag.title }}</span>{% endfor %}
-          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/taggings" class="inline-form">
+          <span class="icon icon--tag-outline"></span>
+          {% for tag in view.tags %}<span class="card__tag">{{ tag.title }}</span>{% endfor %}
+          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/taggings" class="flex align-center gap-half">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input name="tag_title" placeholder="tag" aria-label="Tag" list="tag-list" data-hotkey-target="tag">
-            <button type="submit" data-hotkey="tag">Tag <kbd>T</kbd></button>
+            <input class="input" name="tag_title" placeholder="tag" aria-label="Tag" list="tag-list" data-hotkey-target="tag">
+            <button type="submit" class="btn" data-hotkey="tag">Tag <kbd>T</kbd></button>
           </form>
           <datalist id="tag-list">{% for tag in all_tags %}<option value="{{ tag.title }}">{% endfor %}</datalist>
         </div>
       </header>
-      <form class="card__edit" method="post" action="{{ slug }}/cards/{{ view.card.number }}" enctype="multipart/form-data">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="_method" value="put">
-        <input class="card__title-input" name="card[title]" value="{{ view.card.title or '' }}" maxlength="255" aria-label="Title" data-hotkey-target="edit">
-        <div class="card__description" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Description" data-plain="{{ view.description_text }}">{{ view.description_html|safe }}</div>
-        <input type="hidden" name="card[description]" value="">
-        <div class="row">
-          <button type="submit" data-hotkey="save">Save <kbd>⌘↩</kbd></button>
-          <label class="file">Image <input type="file" name="card[image]" accept="image/jpeg,image/png,image/gif,image/webp"></label>
-          {% if view.image %}
-          <button type="submit" class="ghost" formaction="{{ slug }}/cards/{{ view.card.number }}/image" name="_method" value="delete">Remove image</button>
-          {% endif %}
-        </div>
-      </form>
-      {% if view.stages %}
-      <div class="card__stages">
-        <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/triage">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="_method" value="delete">
-          <button type="submit" class="card__column-name{% if not view.column and not view.closed and not view.postponed %} is-current{% endif %}">Maybe?</button>
-        </form>
-        {% for stage in view.stages %}
-        <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/triage">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button class="card__column-name{% if stage.current and not view.closed and not view.postponed %} is-current{% endif %}" name="column_id" value="{{ stage.id }}" type="submit" style="--column-color: {{ stage.color }}">{{ stage.name }}</button>
-        </form>
-        {% endfor %}
-      </div>
-      {% endif %}
-      {% if view.stamp %}
-      <div class="card__stamp">
-        <span>{{ view.stamp.title }}</span>
-        <strong>{{ view.stamp.date }}</strong>
-        {% if view.stamp.by %}<em>by {{ view.stamp.by }}</em>{% endif %}
-      </div>
-      {% endif %}
-      <div class="steps">
-        {% for step in view.steps %}
-        <div class="steps__row">
-          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
+      <div class="card__body justify-space-between">
+        <div class="card__content">
+          <form class="card__edit" method="post" action="{{ slug }}/cards/{{ view.card.number }}" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="_method" value="put">
-            <input type="hidden" name="step[completed]" value="{{ 'false' if step.completed else 'true' }}">
-            <button type="submit" class="check{% if step.completed %} on{% endif %}" aria-label="Toggle step">{{ "✓" if step.completed else "" }}</button>
+            <h1 class="card__title">
+              <input class="card-field__title input input--textarea full-width borderless" name="card[title]" value="{{ view.card.title or '' }}" maxlength="255" aria-label="Title" data-hotkey-target="edit">
+            </h1>
+            <div class="card__description lexxy-content" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Description" data-plain="{{ view.description_text }}">{{ view.description_html|safe }}</div>
+            <input type="hidden" name="card[description]" value="">
+            <div class="flex gap align-center">
+              <button type="submit" class="btn btn--link" data-hotkey="save">Save</button>
+              <label class="btn">Image <input type="file" name="card[image]" accept="image/jpeg,image/png,image/gif,image/webp"></label>
+              {% if view.image %}
+              <button type="submit" class="btn" formaction="{{ slug }}/cards/{{ view.card.number }}/image" name="_method" value="delete">Remove image</button>
+              {% endif %}
+            </div>
           </form>
-          <input class="step__content{% if step.completed %} done{% endif %}" value="{{ step.content }}" aria-label="Step" data-url="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
-          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
+          <div class="steps">
+            {% for step in view.steps %}
+            <div class="steps__row flex align-center gap">
+              <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="_method" value="put">
+                <input type="hidden" name="step[completed]" value="{{ 'false' if step.completed else 'true' }}">
+                <button type="submit" class="btn btn--circle{% if step.completed %} is-on{% endif %}" aria-label="Toggle step">{% if step.completed %}<span class="icon icon--check"></span>{% endif %}</button>
+              </form>
+              <input class="step__content input full-width{% if step.completed %} done{% endif %}" value="{{ step.content }}" aria-label="Step" data-url="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
+              <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="_method" value="delete">
+                <button class="btn btn--plain" type="submit">Remove</button>
+              </form>
+            </div>
+            {% endfor %}
+            <form class="flex gap" method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input class="input full-width" name="step[content]" placeholder="Add a step" aria-label="New step">
+              <button class="btn" type="submit">Add</button>
+            </form>
+          </div>
+        </div>
+        {% if view.stages %}
+        <div class="card__stages">
+          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/triage">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="_method" value="delete">
-            <button class="text" type="submit">Remove</button>
+            <button type="submit" class="card__column-name btn{% if not view.column and not view.closed and not view.postponed %} card__column-name--current{% endif %}">Maybe?</button>
           </form>
+          {% for stage in view.stages %}
+          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/triage">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="card__column-name btn{% if stage.current and not view.closed and not view.postponed %} card__column-name--current{% endif %}" name="column_id" value="{{ stage.id }}" type="submit" style="--column-color: {{ stage.color }}">{{ stage.name }}</button>
+          </form>
+          {% endfor %}
         </div>
-        {% endfor %}
-        <form class="inline-form" method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input name="step[content]" placeholder="Add a step" aria-label="New step">
-          <button type="submit">Add</button>
-        </form>
+        {% endif %}
+        {% if view.stamp %}
+        <div class="card__closed">
+          <span class="card__closed-title" data-text="{{ view.stamp.title }}">{{ view.stamp.title }}</span>
+          <strong class="card__closed-date">{{ view.stamp.date }}</strong>
+          {% if view.stamp.by %}<span class="card__closed-by-line">by <span class="card__closed-by">{{ view.stamp.by }}</span></span>{% endif %}
+        </div>
+        {% endif %}
       </div>
       <footer class="card__footer">
         <div class="card__meta">
-          {% if view.creator %}<i class="face">{{ view.creator.name[:1] }}</i> <span>{{ view.creator.name }}</span>{% endif %}
+          {% if view.creator %}<span class="avatar txt-x-small">{{ view.creator.name[:1] }}</span> <span>{{ view.creator.name }}</span>{% endif %}
           <span>added {{ view.added_ago }}</span>
           <span>updated {{ view.active_ago }}</span>
         </div>
-        <div class="card__assign">
+        <div class="card__assign flex gap wrap">
           {% for person in view.assignees %}
           <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/assignments">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="assignee_id" value="{{ person.id }}">
-            <button type="submit">{{ person.name }} ×</button>
+            <button type="submit" class="btn">{{ person.name }} ×</button>
           </form>
           {% endfor %}
           <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/self_assignment">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" data-hotkey="me">Assign to me <kbd>M</kbd></button>
+            <button type="submit" class="btn" data-hotkey="me">Assign to me <kbd>M</kbd></button>
           </form>
-          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/assignments" class="inline-form">
+          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/assignments" class="flex gap">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <select name="assignee_id" aria-label="Assign" data-hotkey-target="assign">
+            <select class="input" name="assignee_id" aria-label="Assign" data-hotkey-target="assign">
               {% for person in members if person.active %}
               <option value="{{ person.id }}">{{ person.name }}</option>
               {% endfor %}
             </select>
-            <button type="submit" data-hotkey="assign">Assign <kbd>A</kbd></button>
+            <button type="submit" class="btn" data-hotkey="assign">Assign <kbd>A</kbd></button>
           </form>
         </div>
       </footer>
       {% if not view.closed and not view.postponed %}
       <div class="bubble" hidden data-closes-at="{{ view.closes_at }}" data-reminder-days="{{ view.reminder_days }}" data-stalled-at="{{ view.stalled_at }}">
-        <svg viewBox="0 0 200 100" aria-hidden="true"><path id="perma-top-{{ view.card.number }}" fill="none" d="M20,100 A80,80 0 0,1 180,100"/><text text-anchor="middle" fill="currentColor"><textPath href="#perma-top-{{ view.card.number }}" startOffset="50%" data-bubble="top"></textPath></text></svg>
+        <svg viewBox="0 0 200 100" aria-hidden="true"><path id="perma-top-{{ view.card.number }}" fill="transparent" d="M20,100 A80,80 0 0,1 180,100"/><text text-anchor="middle" fill="currentColor"><textPath href="#perma-top-{{ view.card.number }}" startOffset="50%" data-bubble="top"></textPath></text></svg>
         <span class="bubble__number" data-bubble="center"></span>
-        <svg viewBox="0 0 200 100" aria-hidden="true"><path id="perma-bottom-{{ view.card.number }}" fill="none" d="M20,0 A80,80 0 0,0 180,0"/><text text-anchor="middle" fill="currentColor"><textPath href="#perma-bottom-{{ view.card.number }}" startOffset="50%" data-bubble="bottom"></textPath></text></svg>
+        <svg viewBox="0 0 200 100" aria-hidden="true"><path id="perma-bottom-{{ view.card.number }}" fill="transparent" d="M20,0 A80,80 0 0,0 180,0"/><text text-anchor="middle" fill="currentColor"><textPath href="#perma-bottom-{{ view.card.number }}" startOffset="50%" data-bubble="bottom"></textPath></text></svg>
       </div>
       {% endif %}
     </article>
-    <div class="perma__actions">
-      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/watch">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        {% if view.watching %}<input type="hidden" name="_method" value="delete">{% endif %}
-        <button type="submit" class="icon-button" data-hotkey="watch">{{ "Unwatch" if view.watching else "Watch" }} <kbd>⇧N</kbd></button>
-      </form>
-      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/pin">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        {% if view.pinned %}<input type="hidden" name="_method" value="delete">{% endif %}
-        <button type="submit" class="icon-button" data-hotkey="pin">{{ "Unpin" if view.pinned else "Pin" }} <kbd>⇧P</kbd></button>
-      </form>
-    </div>
-    <div class="perma__closure">
-      {% if view.closed %}
-      <p>Completed{% if view.stamp and view.stamp.by %} by {{ view.stamp.by }}{% endif %}{% if view.stamp %} on {{ view.stamp.date }}{% endif %}.</p>
-      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/closure">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="_method" value="delete">
-        <button type="submit">Undo</button>
-      </form>
-      {% else %}
-      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/closure">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" data-hotkey="done">Mark as Done <kbd>D</kbd></button>
-      </form>
-      {% if not view.postponed %}
-      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/not_now">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" data-hotkey="postpone">Not Now <kbd>[</kbd></button>
-      </form>
-      <p class="quiet">Moves to Not Now after {{ days }} quiet days if there’s no activity.</p>
-      {% endif %}
-      {% endif %}
-      <button type="button" class="ghost" data-hotkey="edit">Edit <kbd>E</kbd></button>
-    </div>
   </div>
+  <div class="card-perma__actions card-perma__actions--right">
+    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/watch">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% if view.watching %}<input type="hidden" name="_method" value="delete">{% endif %}
+      <button type="submit" class="btn" data-hotkey="watch">{{ "Unwatch" if view.watching else "Watch" }} <kbd>⇧N</kbd></button>
+    </form>
+    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/pin">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% if view.pinned %}<input type="hidden" name="_method" value="delete">{% endif %}
+      <button type="submit" class="btn" data-hotkey="pin">{{ "Unpin" if view.pinned else "Pin" }} <kbd>⇧P</kbd></button>
+    </form>
+    {% if view.closed %}
+    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/closure">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="_method" value="delete">
+      <button type="submit" class="btn">Undo</button>
+    </form>
+    {% else %}
+    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/closure">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn" data-hotkey="done">Mark as Done <kbd>D</kbd></button>
+    </form>
+    {% if not view.postponed %}
+    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/not_now">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn" data-hotkey="postpone">Not Now <kbd>[</kbd></button>
+    </form>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% if not view.closed and not view.postponed %}
+  <div class="card-perma__notch card-perma__notch--bottom">
+    <p>Moves to Not Now after {{ days }} quiet days if there’s no activity.</p>
+  </div>
+  {% endif %}
 </section>
-<section class="thread">
+<section class="comments panel panel--wide">
   <h2>Comments</h2>
   {% for item in comments %}
   <article class="comment" id="comment-{{ item.comment.id }}">
     <header><strong>{{ item.author.name if item.author else "Someone" }}</strong> <time>{{ item.comment.created_at }}</time></header>
     <div class="prose">{{ item.html|safe }}</div>
-    <div class="reactions">
+    <div class="reactions flex gap">
       {% for reaction in item.reactions %}
       <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/comments/{{ item.comment.id }}/reactions/{{ reaction.id }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="_method" value="delete">
-        <button type="submit">{{ reaction.content }}</button>
+        <button type="submit" class="btn">{{ reaction.content }}</button>
       </form>
       {% endfor %}
-      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/comments/{{ item.comment.id }}/reactions" class="inline-form">
+      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/comments/{{ item.comment.id }}/reactions" class="flex gap">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input name="reaction[content]" maxlength="16" placeholder="React" aria-label="Comment reaction">
-        <button type="submit">Add</button>
+        <input class="input" name="reaction[content]" maxlength="16" placeholder="React" aria-label="Comment reaction">
+        <button type="submit" class="btn">Add</button>
       </form>
     </div>
   </article>
   {% else %}
-  <p class="empty">No comments yet.</p>
+  <p>No comments yet.</p>
   {% endfor %}
-  <form class="stack-form" method="post" action="{{ slug }}/cards/{{ view.card.number }}/comments">
+  <form class="flex flex-column gap" method="post" action="{{ slug }}/cards/{{ view.card.number }}/comments">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <textarea name="comment[body]" rows="3" required placeholder="Write a comment" aria-label="Comment"></textarea>
-    <button type="submit">Comment <kbd>⌘↩</kbd></button>
+    <textarea class="input" name="comment[body]" rows="3" required placeholder="Write a comment" aria-label="Comment"></textarea>
+    <button type="submit" class="btn btn--link">Comment</button>
   </form>
   <h2>Boosts</h2>
-  <div class="reactions">
+  <div class="reactions flex gap">
     {% for reaction in reactions %}
     <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/reactions/{{ reaction.id }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="_method" value="delete">
-      <button type="submit">{{ reaction.content }}</button>
+      <button type="submit" class="btn">{{ reaction.content }}</button>
     </form>
     {% endfor %}
-    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/reactions" class="inline-form">
+    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/reactions" class="flex gap">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input name="reaction[content]" maxlength="16" placeholder="Nice" aria-label="Boost">
-      <button type="submit">Boost</button>
+      <input class="input" name="reaction[content]" maxlength="16" placeholder="Nice" aria-label="Boost">
+      <button type="submit" class="btn">Boost</button>
     </form>
   </div>
-  <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/board" class="inline-form">
+  <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/board" class="flex gap align-center">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="_method" value="put">
     <label>Move to board
-      <select name="board_id">
+      <select class="input" name="board_id">
         {% for other in boards %}
         <option value="{{ other.id }}" {% if other.id == board.id %}selected{% endif %}>{{ other.name }}</option>
         {% endfor %}
       </select>
     </label>
-    <button type="submit">Move</button>
+    <button type="submit" class="btn">Move</button>
   </form>
   <form method="post" action="{{ slug }}/cards/{{ view.card.number }}" class="danger">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="_method" value="delete">
-    <button type="submit">Delete card</button>
+    <button type="submit" class="btn">Delete card</button>
   </form>
 </section>

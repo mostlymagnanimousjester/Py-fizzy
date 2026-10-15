@@ -2,115 +2,163 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
   <title>{% block title %}Fizzy{% endblock %}</title>
   <meta name="csrf-token" content="{{ csrf_token }}">
+  <link rel="icon" href="{{ url_for('static', filename='vendor/logo.png') }}" type="image/png">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fizzy.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
-<body class="{% block body_class %}{% endblock %}" data-slug="{{ slug }}" {% if current_user %}data-user-id="{{ current_user.id }}"{% endif %}>
-  <header class="header">
-    <a class="skip" href="#main">Skip to main content</a>
-    {% if current_user %}
-    <button type="button" class="mark" data-hotkey="jump" aria-haspopup="dialog" aria-controls="jump">
-      <span>Fizzy</span>
-      <kbd>J</kbd>
-    </button>
-    {% else %}
-    <a class="mark" href="/"><span>Fizzy</span></a>
-    {% endif %}
-    <h1 class="header__title">{% block header_title %}{% endblock %}</h1>
-    <div class="header__end">{% block header_end %}{% endblock %}</div>
-  </header>
+<body class="{% if not current_user %}public{% endif %} {% block body_class %}{% endblock %}" data-slug="{{ slug }}" {% if current_user %}data-user-id="{{ current_user.id }}"{% endif %}>
+  <div id="global-container">
+    <header class="header {% block header_class %}{% endblock %}" id="header">
+      <a href="#main" class="header__skip-navigation btn">Skip to main content</a>
+      {% if current_user %}
+      <nav class="nav">
+        <button type="button" class="nav__trigger input input--select center flex-inline align-center txt-normal" data-hotkey="jump" aria-haspopup="dialog" aria-controls="jump">
+          <span><img src="{{ url_for('static', filename='vendor/logo.png') }}" alt=""></span>
+          <img class="wordmark" src="{{ url_for('static', filename='vendor/wordmark.svg') }}" alt="Fizzy">
+          <kbd class="kbd txt-xx-small">J</kbd>
+        </button>
+        <dialog id="jump" class="nav__menu filter popup popup--animated panel margin-block-start">
+          <div class="flex gap">
+            <div class="flex flex-column full-width justify-center gap-half">
+              <div class="nav__header">
+                {% if account %}
+                <div class="nav__header-title max-width">
+                  <div class="overflow-ellipsis"><strong>{{ account.name }}</strong></div>
+                </div>
+                {% endif %}
+                <div class="nav__header-actions nav__header-actions--end nav__close">
+                  <form method="dialog">
+                    <button class="btn txt-xx-small" value="cancel" aria-label="Close menu">
+                      <span class="icon icon--close"></span>
+                      <span class="for-screen-reader">Close menu</span>
+                    </button>
+                  </form>
+                </div>
+              </div>
+              <input type="search" class="input" placeholder="Jump to…" aria-label="Filter menu" data-jump-filter>
+            </div>
+          </div>
+          <div class="nav__scroll-container">
+            <div class="nav__hotkeys margin-block-end-half" role="list">
+              <a class="btn" href="{{ slug }}/" data-menu-key="1"><span class="icon icon--home"></span> Home <kbd>1</kbd></a>
+              <a class="btn" href="{{ slug }}/cards?assignee_ids[]={{ current_user.id }}" data-menu-key="2"><span class="icon icon--clipboard"></span> Assigned to me <kbd>2</kbd></a>
+              <a class="btn" href="{{ slug }}/cards?creator_ids[]={{ current_user.id }}" data-menu-key="3"><span class="icon icon--person-add"></span> Added by me <kbd>3</kbd></a>
+            </div>
+            <nav data-jump-list>
+              <h3 class="txt-x-small txt-uppercase">Boards</h3>
+              <ul class="popup__list">
+                <li class="popup__item">
+                  <span class="icon icon--add popup__icon"></span>
+                  <a class="popup__btn btn" href="{{ slug }}/boards/new"><span class="overflow-ellipsis">Add a board</span></a>
+                </li>
+                {% for board in nav_boards %}
+                <li class="popup__item">
+                  <span class="icon icon--board popup__icon"></span>
+                  <a class="popup__btn btn" href="{{ slug }}/boards/{{ board.id }}"><span class="overflow-ellipsis">{{ board.name }}</span></a>
+                </li>
+                {% endfor %}
+              </ul>
+              <h3 class="txt-x-small txt-uppercase">Library</h3>
+              <ul class="popup__list">
+                <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/cards?indexed_by=golden">Golden cards</a></li>
+                <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/cards?indexed_by=stalled">Stalled cards</a></li>
+                <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/cards?indexed_by=postponing_soon">Cards closing soon</a></li>
+                <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/cards?creation=today">Added today</a></li>
+                <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/cards?closure=today">Done today</a></li>
+                <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/">Activity</a></li>
+                <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/cards">All cards</a></li>
+                <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/users">People</a></li>
+                <li class="popup__item"><a class="popup__btn btn" href="{{ slug }}/account/settings">Settings</a></li>
+                <li class="popup__item"><a class="popup__btn btn" href="/my/access_tokens">API tokens</a></li>
+                <li class="popup__item"><a class="popup__btn btn" href="/accounts">Switch account</a></li>
+              </ul>
+            </nav>
+            <p class="txt-x-small translucent">J menu · K search · P pins · N inbox · arrows move · [ Not Now · ] Done · M me</p>
+          </div>
+          <form method="post" action="/logout">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="_method" value="delete">
+            <button type="submit" class="btn btn--plain"><span class="icon icon--logout"></span> Log out</button>
+          </form>
+        </dialog>
+      </nav>
+      {% else %}
+      <a class="nav__trigger input center flex-inline align-center" href="/">
+        <span><img src="{{ url_for('static', filename='vendor/logo.png') }}" alt=""></span>
+        <img class="wordmark" src="{{ url_for('static', filename='vendor/wordmark.svg') }}" alt="Fizzy">
+      </a>
+      {% endif %}
+      <div class="header__actions header__actions--start">{% block header_start %}{% endblock %}</div>
+      <h1 class="header__title divider divider--fade full-width">{% block header_title %}{% endblock %}</h1>
+      <div class="header__actions header__actions--end">{% block header_end %}{% endblock %}</div>
+    </header>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+      <div class="flash"><div class="flash__inner shadow">{{ messages[0] }}</div></div>
+      {% endif %}
+    {% endwith %}
+    <main id="main">
+      {% block body %}{% endblock %}
+    </main>
+  </div>
   {% if current_user %}
-  <dialog id="jump" class="jump">
-    <form method="dialog" class="jump__head">
-      <strong>{{ account.name if account else "Fizzy" }}</strong>
-      <button value="cancel" aria-label="Close menu">Close</button>
-    </form>
-    <input type="search" class="jump__filter" placeholder="Jump to…" aria-label="Filter menu" data-jump-filter>
-    <div class="jump__keys">
-      <a href="{{ slug }}/" data-menu-key="1">Home <kbd>1</kbd></a>
-      <a href="{{ slug }}/cards?assignee_ids[]={{ current_user.id }}" data-menu-key="2">Assigned to me <kbd>2</kbd></a>
-      <a href="{{ slug }}/cards?creator_ids[]={{ current_user.id }}" data-menu-key="3">Added by me <kbd>3</kbd></a>
+  <footer id="footer">
+    <div id="footer_frames">
+      <div class="bar full-width">
+        <div class="flex justify-center bar__placeholder">
+          <button type="button" class="btn btn--plain" data-hotkey="k"><span>Search <kbd class="kbd">K</kbd></span></button>
+        </div>
+        <div class="bar__input" hidden>
+          <form class="search" action="{{ slug }}/search" method="get">
+            <input class="input full-width" name="q" aria-label="Search cards" placeholder="Search cards" autocomplete="off" value="{{ request.args.get('q', '') }}">
+          </form>
+        </div>
+        <dialog id="bar-modal" class="bar__modal">
+          <div class="bar__results search"></div>
+        </dialog>
+      </div>
+      <section class="tray tray--pins">
+        <dialog class="tray__dialog" id="pins-tray">
+          {% for pin in tray_pins %}
+          <a class="tray__item" href="{{ slug }}/cards/{{ pin.number }}">#{{ pin.number }} {{ pin.title }}</a>
+          {% else %}
+          <p class="tray__empty">No pins yet.</p>
+          {% endfor %}
+          <a class="tray__more" href="{{ slug }}/my/pins">All pins</a>
+        </dialog>
+        <button type="button" class="tray__toggle" data-hotkey="p" aria-controls="pins-tray" aria-label="Toggle pins stack">
+          <div class="tray__toggle-btn txt-uppercase btn btn--reversed txt-x-small center full-width">
+            <span class="icon icon--pinned"></span>
+            <span class="tray__toggle-text">Pinned <kbd class="kbd">P</kbd></span>
+          </div>
+        </button>
+      </section>
+      <section class="tray tray--notifications">
+        <dialog class="tray__dialog" id="notes-tray">
+          {% for note in tray_notes %}
+          <a class="tray__item{% if not note.read %} unread{% endif %}" href="{{ slug }}/cards/{{ note.card.number if note.card else '' }}">{{ note.body }}</a>
+          {% else %}
+          <p class="tray__empty">Inbox is clear.</p>
+          {% endfor %}
+          <form method="post" action="{{ slug }}/notifications/bulk_reading">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="btn btn--plain">Clear all</button>
+          </form>
+          <a class="tray__more" href="{{ slug }}/notifications">Open inbox</a>
+        </dialog>
+        <button type="button" class="tray__toggle" data-hotkey="n" aria-controls="notes-tray" aria-label="Toggle notifications stack">
+          <div class="tray__toggle-btn txt-uppercase btn btn--reversed txt-x-small center full-width">
+            <span class="icon icon--bell"></span>
+            <span class="tray__toggle-text">Notifications <kbd class="kbd">N</kbd></span>
+            {% if unread %}<span class="count">{{ unread }}</span>{% endif %}
+          </div>
+        </button>
+      </section>
     </div>
-    <nav class="jump__list" data-jump-list>
-      <p class="jump__label">Boards</p>
-      {% for board in nav_boards %}
-      <a href="{{ slug }}/boards/{{ board.id }}">{{ board.name }}</a>
-      {% endfor %}
-      <a href="{{ slug }}/boards/new">New board</a>
-      <p class="jump__label">Library</p>
-      <a href="{{ slug }}/cards?indexed_by=golden">Golden cards</a>
-      <a href="{{ slug }}/cards?indexed_by=stalled">Stalled cards</a>
-      <a href="{{ slug }}/cards?indexed_by=postponing_soon">Cards closing soon</a>
-      <a href="{{ slug }}/cards?creation=today">Added today</a>
-      <a href="{{ slug }}/cards?closure=today">Done today</a>
-      <a href="{{ slug }}/">Activity</a>
-      <a href="{{ slug }}/cards">All cards</a>
-      <a href="{{ slug }}/users">People</a>
-      <a href="{{ slug }}/account/settings">Settings</a>
-      <a href="/my/access_tokens">API tokens</a>
-      <a href="/accounts">Switch account</a>
-    </nav>
-    <div class="jump__help">
-      <span><kbd>J</kbd> menu</span>
-      <span><kbd>K</kbd> search</span>
-      <span><kbd>P</kbd> pins</span>
-      <span><kbd>N</kbd> inbox</span>
-      <span><kbd>←</kbd><kbd>→</kbd> columns</span>
-      <span><kbd>↑</kbd><kbd>↓</kbd> cards</span>
-      <span><kbd>[</kbd> Not Now</span>
-      <span><kbd>]</kbd> Done</span>
-      <span><kbd>M</kbd> me</span>
-      <span><kbd>G</kbd> gold</span>
-      <span><kbd>Esc</kbd> close</span>
-    </div>
-    <form method="post" action="/logout">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="_method" value="delete">
-      <button type="submit">Log out</button>
-    </form>
-  </dialog>
-  {% endif %}
-  {% with messages = get_flashed_messages() %}
-    {% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}
-  {% endwith %}
-  <main id="main">
-    {% block body %}{% endblock %}
-  </main>
-  {% if current_user %}
-  <footer class="dock">
-    <section class="tray tray--pins">
-      <dialog class="tray__dialog" id="pins-tray">
-        {% for pin in tray_pins %}
-        <a class="tray__item" href="{{ slug }}/cards/{{ pin.number }}">#{{ pin.number }} {{ pin.title }}</a>
-        {% else %}
-        <p class="tray__empty">No pins yet.</p>
-        {% endfor %}
-        <a class="tray__more" href="{{ slug }}/my/pins">All pins</a>
-      </dialog>
-      <button type="button" class="tray__toggle" data-hotkey="p" aria-controls="pins-tray">Pinned <kbd>P</kbd></button>
-    </section>
-    <form class="bar" action="{{ slug }}/search" method="get">
-      <div class="bar__results" hidden></div>
-      <button type="button" class="bar__label" data-hotkey="k">Search <kbd>K</kbd></button>
-      <input class="bar__input" name="q" aria-label="Search cards" placeholder="Search cards" autocomplete="off" value="{{ request.args.get('q', '') }}">
-    </form>
-    <section class="tray tray--notes">
-      <dialog class="tray__dialog" id="notes-tray">
-        {% for note in tray_notes %}
-        <a class="tray__item{% if not note.read %} unread{% endif %}" href="{{ slug }}/cards/{{ note.card.number if note.card else '' }}">{{ note.body }}</a>
-        {% else %}
-        <p class="tray__empty">Inbox is clear.</p>
-        {% endfor %}
-        <form method="post" action="{{ slug }}/notifications/bulk_reading">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit">Clear all</button>
-        </form>
-        <a class="tray__more" href="{{ slug }}/notifications">Open inbox</a>
-      </dialog>
-      <button type="button" class="tray__toggle" data-hotkey="n" aria-controls="notes-tray">Notifications <kbd>N</kbd>{% if unread %} <span class="count">{{ unread }}</span>{% endif %}</button>
-    </section>
   </footer>
   {% endif %}
   <script src="{{ url_for('static', filename='app.js') }}"></script>

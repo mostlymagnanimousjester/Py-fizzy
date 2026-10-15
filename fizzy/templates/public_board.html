@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ board.name }} · Fizzy{% endblock %}
 {% block header_title %}{{ board.name }}{% endblock %}
-{% block body_class %}board-page public{% endblock %}
+{% block body_class %}contained-scrolling public{% endblock %}
 {% block body %}
 {% if description %}<div class="prose public-note">{{ description|safe }}</div>{% endif %}
 <div class="card-columns" data-board="{{ board.id }}">

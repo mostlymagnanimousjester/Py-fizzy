@@ -1,62 +1,67 @@
 <section class="cards {% if lane == 'maybe' %}cards--maybe{% elif lane == 'not_now' %}cards--on-deck{% elif lane == 'closed' %}cards--closed{% else %}cards--doing{% endif %} {% if collapsed %}is-collapsed{% else %}is-expanded{% endif %}"
-  style="--card-count: {{ cards|length }}{% if color %}; --card-color: {{ color }}{% endif %}"
+  style="--card-color: {{ color or 'var(--color-card-default)' }}; --card-count: {{ [cards|length, 15]|min }}"
   data-card-count="{{ cards|length }}"
+  data-column-name="{{ title }}"
   {% if lane %}data-lane="{{ lane }}"{% endif %}
   {% if column %}data-column-id="{{ column.id }}" id="column-{{ column.id }}"{% elif lane %}id="lane-{{ lane }}"{% endif %}
+  {% if lane == 'maybe' %}aria-selected="true"{% endif %}
   tabindex="0">
-  <div class="cards__transition">
+  <div class="cards__transition-container">
     <header class="cards__header">
       {% if column and current_user and not public_key %}
-      <details class="cards__menu">
-        <summary aria-label="Column menu">⋯</summary>
-        <div class="cards__menu-panel">
+      <div class="cards__menu">
+        <button type="button" class="btn btn--circle txt-x-small borderless" aria-label="Column options">
+          <span class="icon icon--menu-dots-horizontal"></span>
+        </button>
+        <dialog class="popup popup--align-right panel flex-column gap fill-white shadow txt-small">
           <form method="post" action="{{ slug }}/boards/{{ column.board_id }}/columns/{{ column.id }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="_method" value="put">
-            <label>Name <input name="column[name]" value="{{ column.name }}" required maxlength="255"></label>
-            <label>Color
-              <select name="column[color]">
-                {% for name, value in colors %}
-                <option value="{{ value }}" {% if value == column.color %}selected{% endif %}>{{ name }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <button type="submit">Save column</button>
+            <input class="input" name="column[name]" value="{{ column.name }}" required maxlength="255" aria-label="Column name" placeholder="Name this column">
+            <div class="color-picker__colors">
+              {% for name, value in colors %}
+              <label class="btn txt-small borderless" style="--btn-background: {{ value }}" title="{{ name }}">
+                <input type="radio" name="column[color]" value="{{ value }}" {% if value == column.color %}checked{% endif %}>
+                <span class="icon icon--check checked"></span>
+                <span class="for-screen-reader">{{ name }}</span>
+              </label>
+              {% endfor %}
+            </div>
+            <button type="submit" class="btn btn--link">Save changes</button>
           </form>
           <form method="post" action="{{ slug }}/columns/{{ column.id }}/move">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button name="direction" value="left" type="submit">Move left</button>
-            <button name="direction" value="right" type="submit">Move right</button>
+            <button class="popup__btn btn" name="direction" value="left" type="submit"><span class="icon icon--column-left"></span> Move to the left</button>
+            <button class="popup__btn btn" name="direction" value="right" type="submit"><span class="icon icon--column-right"></span> Move to the right</button>
           </form>
           <form method="post" action="{{ slug }}/boards/{{ column.board_id }}/columns/{{ column.id }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="_method" value="delete">
-            <button type="submit">Delete column</button>
+            <button type="submit" class="popup__btn btn">Delete column</button>
           </form>
-        </div>
-      </details>
+        </dialog>
+      </div>
       {% else %}
-      <span class="cards__spacer"></span>
+      <span></span>
       {% endif %}
-      <button type="button" class="cards__expander" aria-expanded="{{ 'false' if collapsed else 'true' }}">
+      <button type="button" class="cards__expander btn btn--plain" aria-expanded="{{ 'false' if collapsed else 'true' }}" {% if lane == 'maybe' %}disabled{% endif %}>
         <span class="cards__expander-count">{{ cards|length if cards|length < 100 else "99+" }}</span>
-        <span class="cards__expander-title">{{ title }}</span>
+        <h2 class="cards__expander-title">{{ title }} <span class="icon icon--collapse"></span></h2>
       </button>
-      <span class="cards__spacer"></span>
+      <span class="cards__maximize-button"></span>
     </header>
     {% if lane == 'maybe' and current_user and not public_key %}
-    <form class="add-card" method="post" action="{{ slug }}/boards/{{ board.id }}/cards">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="button" class="add-card__toggle">Add a card</button>
-      <div class="add-card__fields" hidden>
-        <input name="card[title]" placeholder="Card title" maxlength="255" aria-label="New card title">
-        <button type="submit">Add</button>
-      </div>
-    </form>
+    <div class="board-tools card">
+      <form class="add-card" method="post" action="{{ slug }}/boards/{{ board.id }}/cards">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input class="input" name="card[title]" placeholder="Card title" maxlength="255" aria-label="New card title">
+        <button type="submit" class="btn btn--link">Add a card</button>
+      </form>
+    </div>
     {% endif %}
-    <div class="cards__list" data-navigable>
+    <div class="cards__list hide-scrollbar">
       {% for view in cards %}{% include "_card.html" %}{% else %}
-      <p class="empty">{% if lane == 'maybe' %}Nothing is waiting to be triaged.{% else %}Drop a card here.{% endif %}</p>
+      <p class="blank-slate">{% if lane == 'maybe' %}Nothing is waiting to be triaged.{% else %}Drop a card here.{% endif %}</p>
       {% endfor %}
     </div>
   </div>

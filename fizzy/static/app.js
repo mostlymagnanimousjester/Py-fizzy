@@ -191,8 +191,10 @@
   function recount(column) {
     if (!column) return;
     const count = column.querySelectorAll(".cards__list article.card").length;
-    column.style.setProperty("--card-count", String(count));
+    column.style.setProperty("--card-count", String(Math.min(count, 15)));
     column.dataset.cardCount = String(count);
+    const badge = column.querySelector(".cards__expander-count");
+    if (badge) badge.textContent = count > 99 ? "99+" : String(count);
   }
 
   function escapeHtml(value) {
@@ -366,22 +368,43 @@
   }
 
   document.addEventListener("click", function (event) {
+    const jumpButton = event.target.closest("[data-hotkey='jump']");
+    if (jumpButton) {
+      event.preventDefault();
+      toggleDialog("jump", true);
+      if (jumpFilter) jumpFilter.focus();
+      return;
+    }
+    const trayToggle = event.target.closest(".tray__toggle");
+    if (trayToggle) {
+      event.preventDefault();
+      toggleDialog(trayToggle.getAttribute("aria-controls"), false);
+      return;
+    }
+    const searchButton = event.target.closest(".bar__placeholder [data-hotkey='k']");
+    if (searchButton) {
+      event.preventDefault();
+      openSearch();
+      return;
+    }
+    const menuButton = event.target.closest(".cards__menu > button, .cards__new-toggle");
+    if (menuButton) {
+      const dialog = menuButton.parentElement.querySelector("dialog");
+      if (dialog) {
+        event.preventDefault();
+        if (dialog.open) dialog.close();
+        else dialog.show();
+        const input = dialog.querySelector("input[name='column[name]']");
+        if (input) input.focus();
+      }
+      return;
+    }
     const expander = event.target.closest(".cards__expander");
     if (expander) {
       const column = expander.closest("section.cards");
       if (!column || (column.id === "lane-maybe" && isDesktop())) return;
       if (column.classList.contains("is-expanded") && column.id !== "lane-maybe") collapseSide(column);
       else showColumn(column);
-      return;
-    }
-    const reveal = event.target.closest(".cards__new-toggle");
-    if (reveal) {
-      const form = reveal.parentElement.querySelector("form");
-      if (!form) return;
-      form.hidden = false;
-      reveal.hidden = true;
-      const input = form.querySelector("input[name='column[name]']");
-      if (input) input.focus();
       return;
     }
     const card = event.target.closest("article.card");
@@ -396,12 +419,12 @@
     if (!card || card.getAttribute("draggable") !== "true") return;
     event.dataTransfer.setData("text/plain", card.dataset.number);
     event.dataTransfer.effectAllowed = "move";
-    card.classList.add("dragging");
+    card.classList.add("drag-and-drop__dragged-item");
   });
 
   document.addEventListener("dragend", function () {
-    document.querySelectorAll("article.card.dragging, section.cards.over").forEach(function (node) {
-      node.classList.remove("dragging", "over");
+    document.querySelectorAll("article.card.drag-and-drop__dragged-item, section.cards.drag-and-drop__hover-container").forEach(function (node) {
+      node.classList.remove("drag-and-drop__dragged-item", "drag-and-drop__hover-container");
     });
   });
 
@@ -409,14 +432,14 @@
     const column = event.target.closest && event.target.closest("section.cards");
     if (!column || (!column.dataset.columnId && !column.dataset.lane)) return;
     event.preventDefault();
-    column.classList.add("over");
+    column.classList.add("drag-and-drop__hover-container");
   });
 
   document.addEventListener("drop", function (event) {
     const column = event.target.closest && event.target.closest("section.cards");
     if (!column || (!column.dataset.columnId && !column.dataset.lane)) return;
     event.preventDefault();
-    column.classList.remove("over");
+    column.classList.remove("drag-and-drop__hover-container");
     const number = event.dataTransfer.getData("text/plain");
     if (!number || !slug) return;
     let url = slug + "/cards/" + number + "/triage";
@@ -430,23 +453,42 @@
   });
 
   const bar = document.querySelector(".bar");
-  const barInput = document.querySelector(".bar__input");
+  const barField = document.querySelector(".bar__input");
+  const barInput = barField ? barField.querySelector("input") : null;
   const barResults = document.querySelector(".bar__results");
-  if (bar && barInput && barInput.value) bar.classList.add("is-open");
+  const barModal = document.getElementById("bar-modal");
+  const barPlaceholder = document.querySelector(".bar__placeholder");
+
+  function openSearch() {
+    if (!barField || !barInput) return;
+    if (barPlaceholder) barPlaceholder.hidden = true;
+    barField.hidden = false;
+    barInput.focus();
+    if (barInput.value) barInput.select();
+  }
+
+  function closeSearch() {
+    if (barPlaceholder) barPlaceholder.hidden = false;
+    if (barField) barField.hidden = true;
+    if (barModal && barModal.open) barModal.close();
+    if (barResults) barResults.innerHTML = "";
+    if (barInput) barInput.blur();
+  }
+
+  if (barInput && barInput.value) openSearch();
 
   let searchGeneration = 0;
   function renderSearch(cards) {
     if (!barResults) return;
     if (!cards.length) {
-      barResults.innerHTML = '<p class="tray__empty">No matches.</p>';
-      barResults.hidden = false;
-      return;
+      barResults.innerHTML = '<p class="blank-slate">No matches.</p>';
+    } else {
+      barResults.innerHTML = "<ul>" + cards.map(function (card) {
+        const boardName = card.board && card.board.name ? card.board.name : "";
+        return '<li><a class="search__result" href="' + escapeHtml(card.url) + '"><h3 class="search__title">#' + escapeHtml(card.number) + " " + escapeHtml(card.title || "Untitled") + "</h3><div class=\"search__excerpt\">" + escapeHtml((card.description || "").slice(0, 180)) + "</div><div class=\"overflow-ellipsis translucent\">" + escapeHtml(boardName) + "</div></a></li>";
+      }).join("") + "</ul>";
     }
-    barResults.innerHTML = cards.map(function (card) {
-      const boardName = card.board && card.board.name ? card.board.name : "";
-      return '<a class="search__result" href="' + escapeHtml(card.url) + '"><strong>#' + escapeHtml(card.number) + " " + escapeHtml(card.title || "Untitled") + "</strong><span>" + escapeHtml((card.description || "").slice(0, 180)) + "</span><em>" + escapeHtml(boardName) + "</em></a>";
-    }).join("");
-    barResults.hidden = false;
+    if (barModal && !barModal.open) barModal.show();
   }
 
   if (barInput) {
@@ -454,10 +496,8 @@
       const query = barInput.value.trim();
       const generation = ++searchGeneration;
       if (!query || !slug) {
-        if (barResults) {
-          barResults.hidden = true;
-          barResults.innerHTML = "";
-        }
+        if (barModal && barModal.open) barModal.close();
+        if (barResults) barResults.innerHTML = "";
         return;
       }
       window.setTimeout(function () {
@@ -739,13 +779,8 @@
         event.preventDefault();
         return;
       }
-      if (bar && bar.classList.contains("is-open")) {
-        bar.classList.remove("is-open");
-        if (barResults) {
-          barResults.hidden = true;
-          barResults.innerHTML = "";
-        }
-        if (barInput) barInput.blur();
+      if (barField && !barField.hidden) {
+        closeSearch();
         event.preventDefault();
         return;
       }
@@ -786,7 +821,7 @@
       return;
     }
 
-    if (bar && bar.classList.contains("is-open") && (event.target === barInput || (event.target.closest && event.target.closest(".bar__results")))) {
+    if (barField && !barField.hidden && (event.target === barInput || (event.target.closest && event.target.closest(".bar__results")))) {
       if (plain && (key === "ArrowDown" || key === "ArrowUp") && barResults) {
         event.preventDefault();
         moveLinks(barResults, key === "ArrowDown" ? 1 : -1);
@@ -822,11 +857,9 @@
     if (document.querySelector("dialog[open]") && !trayKey) return;
 
     if (plain && (key === "k" || key === "K")) {
-      if (!bar || !barInput) return;
+      if (!barInput) return;
       event.preventDefault();
-      bar.classList.add("is-open");
-      barInput.focus();
-      barInput.select();
+      openSearch();
       return;
     }
     if (event.shiftKey && !meta && !event.altKey && key === "P") {

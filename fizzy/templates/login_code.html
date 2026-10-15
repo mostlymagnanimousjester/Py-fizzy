@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Code · Fizzy{% endblock %}
 {% block body %}
-<section class="gate">
-  <p class="kicker">{{ email }}</p>
-  <h1>Your code is {{ code }}</h1>
+<div class="panel panel--centered flex flex-column gap-half">
+  <p>{{ email }}</p>
+  <h1 class="txt-x-large font-weight-black">Your code is {{ code }}</h1>
   <p>Fizzy would mail this. Here it stays on the machine that has the database.</p>
-  <form method="post" action="/login/code" class="stack-form">
+  <form method="post" action="/login/code" class="flex flex-column gap-half">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Code <input name="code" value="{{ code }}" required autocomplete="one-time-code"></label>
-    <button type="submit">Continue</button>
+    <input class="input" name="code" value="{{ code }}" required autocomplete="one-time-code" aria-label="Code">
+    <button type="submit" class="btn btn--link">Continue</button>
   </form>
-</section>
+</div>
 {% endblock %}

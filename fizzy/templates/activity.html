@@ -1,28 +1,46 @@
 {% extends "base.html" %}
 {% block title %}Home · Fizzy{% endblock %}
+{% block header_class %}header--events{% endblock %}
 {% block header_title %}Latest Activity{% endblock %}
-{% block body_class %}events-page{% endblock %}
+{% block header_end %}
+  <a class="btn" href="{{ slug }}/boards/new"><span class="icon icon--board-add"></span> Board</a>
+{% endblock %}
 {% block body %}
+{% if nav_boards %}
+<nav class="filters" aria-label="Boards">
+  {% for board in nav_boards %}
+  <a class="btn" href="{{ slug }}/boards/{{ board.id }}"><span class="icon icon--board"></span> {{ board.name }}</a>
+  {% endfor %}
+</nav>
+{% endif %}
 {% if days %}
-<div class="events">
+<div id="activity" class="events">
   {% for day in days %}
   <section class="events__day">
-    <h2>{{ day.label }}</h2>
+    <div class="events__day-header">
+      <h2 class="events__day-time">{{ day.label }}</h2>
+    </div>
     <div class="events__columns">
       {% for key, label in [("added", "Added"), ("updated", "Updated"), ("closed", "Done")] %}
       <div class="events__column">
-        <h3>{{ label }}</h3>
+        <h3 class="events__column-header"><span>{{ label }}</span></h3>
         {% for event in day[key] %}
         <a class="event" href="{{ event.url }}" style="--card-color: {{ event.color }}">
-          <header class="card__header">
-            <span class="card__id">{{ event.number }}</span>
-            <span class="card__board-name">{{ event.board }}</span>
-          </header>
-          <p class="event__line"><i class="face">{{ event.who[:1] }}</i> <span>{{ event.description }}</span></p>
-          {% if event.time %}<time>{{ event.time }}</time>{% endif %}
+          <div class="card__header">
+            <h4 class="card__board">
+              <span class="card__id">{{ event.number }}</span>
+              <span class="card__board-name"><span class="overflow-ellipsis">{{ event.board }}</span></span>
+            </h4>
+          </div>
+          <div class="event__content">
+            <div class="flex align-start gap">
+              <div class="avatar txt-x-small">{{ event.who[:1] }}</div>
+              <strong class="event__title txt-small">{{ event.description }}</strong>
+            </div>
+          </div>
         </a>
         {% else %}
-        <p class="events__quiet">Quiet</p>
+        <p class="txt-small translucent">Quiet</p>
         {% endfor %}
       </div>
       {% endfor %}
@@ -31,8 +49,8 @@
   {% endfor %}
 </div>
 {% else %}
-<section class="sheet">
-  <p class="empty">Nothing has happened yet. <a href="{{ slug }}/boards/new">Create a board</a> and publish a card.</p>
-</section>
+<div class="events__none">
+  <p>No activity yet. <a href="{{ slug }}/boards/new">Create a board</a> and publish a card.</p>
+</div>
 {% endif %}
 {% endblock %}

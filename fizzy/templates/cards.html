@@ -38,8 +38,10 @@
     <button type="submit">Apply</button>
   </form>
   {% if cards %}
-  <div class="card-grid">
-    {% for view in cards %}{% include "_card.html" %}{% endfor %}
+  <div class="cards cards--grid cards-grid">
+    <div class="cards__list">
+      {% for view in cards %}{% include "_card.html" %}{% endfor %}
+    </div>
   </div>
   {% else %}
   <p class="empty">Nothing in this view. Open cards live on a board until you close them or send them to Not now.</p>

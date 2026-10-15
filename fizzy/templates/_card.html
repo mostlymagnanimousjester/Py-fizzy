@@ -6,59 +6,80 @@
   {% if current_user and not view.closed %}data-closure-url="{{ slug }}/cards/{{ view.card.number }}/closure"{% endif %}
   {% if current_user and not view.postponed and not view.closed %}data-not-now-url="{{ slug }}/cards/{{ view.card.number }}/not_now"{% endif %}
   {% if current_user %}data-assign-url="{{ slug }}/cards/{{ view.card.number }}/self_assignment"{% endif %}>
-  <a class="card__link" tabindex="-1" href="{% if public_key %}{{ slug }}/public/boards/{{ public_key }}/cards/{{ view.card.number }}{% else %}{{ slug }}/cards/{{ view.card.number }}{% endif %}" draggable="false">
-    <span class="for-screen-reader">{{ view.card.title or "Untitled" }}</span>
-  </a>
-  {% if view.image %}
-  <div class="card__background"><img alt="" src="{{ slug }}/storage/{{ view.image.id }}"></div>
-  {% endif %}
-  <header class="card__header">
-    <div class="card__board">
-      <span class="card__id">{{ view.card.number }}</span>
-      <span class="card__board-name">{{ view.board_name }}</span>
+  <div class="flex flex-column flex-item-grow max-inline-size">
+    <a class="card__link" tabindex="-1" href="{% if public_key %}{{ slug }}/public/boards/{{ public_key }}/cards/{{ view.card.number }}{% else %}{{ slug }}/cards/{{ view.card.number }}{% endif %}" draggable="false">
+      <span class="for-screen-reader">{{ view.card.title or "Untitled" }}</span>
+    </a>
+    <header class="card__header">
+      <div class="card__board">
+        <span class="card__id">{{ view.card.number }}</span>
+        <span class="card__board-name"><span class="overflow-ellipsis">{{ view.board_name }}</span></span>
+      </div>
+      {% if view.tags %}
+      <div class="card__tags">
+        <span class="icon icon--tag-outline"></span>
+        <div class="min-width overflow-ellipsis">
+          {% for tag in view.tags %}<span class="card__tag">{{ tag.title }}{% if not loop.last %},{% endif %}</span>{% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% if view.step_total %}
+      <div class="card__steps align-center gap-half">
+        <span class="steps__icon"><span class="icon icon--check"></span></span>
+        <strong>{{ view.step_done }}/{{ view.step_total }}</strong>
+      </div>
+      {% endif %}
+      {% if view.column and not view.closed and not view.postponed %}
+      <span class="btn card__column-name card__column-name--current txt-uppercase min-width max-width"><span class="overflow-ellipsis">{{ view.column.name }}</span></span>
+      {% endif %}
+    </header>
+    <div class="card__body justify-space-between">
+      <div class="card__content">
+        <h3 class="card__title overflow-line-clamp">{{ view.card.title or "Untitled" }}</h3>
+      </div>
+      {% if view.stages %}
+      <div class="card__stages">
+        {% for stage in view.stages %}
+        <span class="card__column-name{% if stage.current and not view.closed and not view.postponed %} card__column-name--current{% endif %}">{{ stage.name }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if view.stamp %}
+      <div class="card__closed">
+        <span class="card__closed-title" data-text="{{ view.stamp.title }}">{{ view.stamp.title }}</span>
+        <strong class="card__closed-date">{{ view.stamp.date }}</strong>
+        {% if view.stamp.by %}<span class="card__closed-by-line">by <span class="card__closed-by">{{ view.stamp.by }}</span></span>{% endif %}
+      </div>
+      {% endif %}
     </div>
-    {% if view.tags %}
-    <div class="card__tags">{% for tag in view.tags %}<span>{{ tag.title }}{% if not loop.last %},{% endif %}</span>{% endfor %}</div>
-    {% endif %}
-    {% if view.step_total %}
-    <span class="card__steps">{{ view.step_done }}/{{ view.step_total }}</span>
-    {% endif %}
-  </header>
-  <div class="card__body">
-    <h3 class="card__title">{{ view.card.title or "Untitled" }}</h3>
-    {% if view.stages %}
-    <div class="card__stages">
-      {% for stage in view.stages %}
-      <span class="card__column-name{% if stage.current and not view.closed and not view.postponed %} is-current{% endif %}">{{ stage.name }}</span>
-      {% endfor %}
-    </div>
-    {% endif %}
-    {% if view.stamp %}
-    <div class="card__stamp">
-      <span>{{ view.stamp.title }}</span>
-      <strong>{{ view.stamp.date }}</strong>
-      {% if view.stamp.by %}<em>by {{ view.stamp.by }}</em>{% endif %}
-    </div>
-    {% endif %}
   </div>
-  <footer class="card__footer">
+  <footer class="card__footer flex gap-half">
     <div class="card__meta">
-      {% if view.creator %}<i class="face" title="{{ view.creator.name }}">{{ view.creator.name[:1] }}</i>{% endif %}
-      <span>added {{ view.added_ago }}</span>
-      {% if view.creator %}<span>{{ view.creator.name }}</span>{% endif %}
-      {% if view.active_ago %}<span>updated {{ view.active_ago }}</span>{% endif %}
-      {% if view.assignees %}<span>→ {{ view.assignees|map(attribute='name')|join(' / ') }}</span>{% endif %}
+      <div class="card__meta-avatars card__meta-avatars--author">
+        {% if view.creator %}<span class="avatar txt-x-small" title="{{ view.creator.name }}">{{ view.creator.name[:1] }}</span>{% endif %}
+      </div>
+      <span class="card__meta-text card__meta-text--added">added {{ view.added_ago }}</span>
+      {% if view.creator %}<span class="card__meta-text card__meta-text--author">{{ view.creator.name }}</span>{% endif %}
+      {% if view.active_ago %}
+      <span class="card__meta-text card__meta-text--updated overflow-ellipsis">updated {{ view.active_ago }}</span>
+      {% endif %}
+      {% if view.assignees %}
+      <span class="card__meta-text card__meta-text--assignees overflow-ellipsis">→ {{ view.assignees|map(attribute='name')|join(' / ') }}</span>
+      {% endif %}
     </div>
     <div class="card__counts">
-      {% if view.reaction_count %}<span>{{ view.reaction_count }}</span>{% endif %}
-      {% if view.comment_count %}<span>{{ view.comment_count }}</span>{% endif %}
+      {% if view.reaction_count %}<span class="card__boosts"><span class="icon icon--boost"></span>{{ view.reaction_count }}</span>{% endif %}
+      {% if view.comment_count %}<span class="card__comments"><span class="icon icon--comment"></span>{{ view.comment_count }}</span>{% endif %}
     </div>
+    {% if view.image %}
+    <div class="card__background"><img alt="" src="{{ slug }}/storage/{{ view.image.id }}"></div>
+    {% endif %}
   </footer>
   {% if not view.closed and not view.postponed %}
   <div class="bubble" hidden data-closes-at="{{ view.closes_at }}" data-reminder-days="{{ view.reminder_days }}" data-stalled-at="{{ view.stalled_at }}">
-    <svg viewBox="0 0 200 100" aria-hidden="true"><path id="bubble-top-{{ view.card.number }}" fill="none" d="M20,100 A80,80 0 0,1 180,100"/><text text-anchor="middle" fill="currentColor"><textPath href="#bubble-top-{{ view.card.number }}" startOffset="50%" data-bubble="top"></textPath></text></svg>
+    <svg viewBox="0 0 200 100" aria-hidden="true"><path id="bubble-top-{{ view.card.number }}" fill="transparent" d="M20,100 A80,80 0 0,1 180,100"/><text text-anchor="middle" fill="currentColor"><textPath href="#bubble-top-{{ view.card.number }}" startOffset="50%" data-bubble="top"></textPath></text></svg>
     <span class="bubble__number" data-bubble="center"></span>
-    <svg viewBox="0 0 200 100" aria-hidden="true"><path id="bubble-bottom-{{ view.card.number }}" fill="none" d="M20,0 A80,80 0 0,0 180,0"/><text text-anchor="middle" fill="currentColor"><textPath href="#bubble-bottom-{{ view.card.number }}" startOffset="50%" data-bubble="bottom"></textPath></text></svg>
+    <svg viewBox="0 0 200 100" aria-hidden="true"><path id="bubble-bottom-{{ view.card.number }}" fill="transparent" d="M20,0 A80,80 0 0,0 180,0"/><text text-anchor="middle" fill="currentColor"><textPath href="#bubble-bottom-{{ view.card.number }}" startOffset="50%" data-bubble="bottom"></textPath></text></svg>
   </div>
   {% endif %}
 </article>
