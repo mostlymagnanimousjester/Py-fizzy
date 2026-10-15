@@ -312,6 +312,16 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(fragment["lane"], "closed")
         self.assertIn("COBOL", fragment["html"])
         self.assertFalse(fragment["stay"])
+        paged = self.client.post(
+            card_href + "/goldness",
+            data={"csrf_token": token},
+            headers={"X-Fizzy-Fragment": "page"},
+        )
+        self.assertEqual(paged.status_code, 200, paged.get_data(as_text=True))
+        sheet = paged.get_json()
+        self.assertIn("golden-effect", sheet["html"])
+        self.assertIn("Undo", sheet["html"])
+        self.assertEqual(sheet["boardName"], "Compiler")
 
         self.client.post("/logout", data={"csrf_token": token, "_method": "delete"})
         login = self.client.get("/login")

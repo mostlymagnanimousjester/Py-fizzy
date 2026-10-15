@@ -625,38 +625,10 @@ def board_detail(slug, board_id):
     store.touch_access(conn(), board["id"], g.user["id"])
     store.auto_postpone_board(conn(), board)
     g.deliver = True
-    columns = store.columns_for(conn(), board["id"])
-    lanes = {
-        "maybe": [card_view(conn(), card, g.user["id"]) for card in store.lane_cards(conn(), board["id"], "maybe")],
-        "not_now": [card_view(conn(), card, g.user["id"]) for card in store.lane_cards(conn(), board["id"], "not_now")],
-        "closed": [card_view(conn(), card, g.user["id"]) for card in store.lane_cards(conn(), board["id"], "closed")],
-    }
-    column_views = []
-    for column in columns:
-        column_views.append({
-            "column": column,
-            "cards": [card_view(conn(), card, g.user["id"]) for card in store.column_cards(conn(), column["id"])],
-        })
+    stage = _board_stage_dict(board)
     published = store.publication(conn(), board["id"])
     filters = _card_filters()
     filters["board_ids"] = [board["id"]]
-    filtering = bool(
-        request.args.get("indexed_by")
-        or request.args.get("q")
-        or request.args.get("creation")
-        or request.args.get("closure")
-        or multi("assignee_ids")
-        or multi("creator_ids")
-        or multi("tag_ids")
-    )
-    filtered = [card_view(conn(), card, g.user["id"]) for card in store.query_cards(conn(), g.user, filters, 60, 0)] if filtering else []
-    stage = dict(
-        board=board,
-        columns=column_views,
-        lanes=lanes,
-        filtering=filtering,
-        filtered=filtered,
-    )
     if request.headers.get("X-Fizzy-Fragment") == "board":
         return render_template("_board_stage.html", **stage)
     return render_template(
@@ -702,7 +674,7 @@ def columns(slug, board_id):
         column = store.create_column(conn(), g.user, board, payload.get("name", ""), payload.get("color"))
         if wants_json():
             return json_body(column_json(column, urls), 201, urls("boards", board["id"], "columns", column["id"]) + ".json")
-        return redirect(f"{g.slug}/boards/{board['id']}")
+        return finish_board(board)
     rows = store.columns_for(conn(), board["id"])
     return json_body([column_json(column, urls) for column in rows])
 
@@ -722,7 +694,7 @@ def column_detail(slug, board_id, column_id):
         store.delete_column(conn(), g.user, column)
         if wants_json():
             return json_body({}, 204)
-        return redirect(f"{g.slug}/boards/{board['id']}")
+        return finish_board(board)
     if action in {"PUT", "PATCH"}:
         payload = form_body("column")
         updated = store.update_column(
@@ -731,7 +703,9 @@ def column_detail(slug, board_id, column_id):
             color=payload.get("color"),
             position=payload.get("position"),
         )
-        return json_body(column_json(updated, urls))
+        if wants_json():
+            return json_body(column_json(updated, urls))
+        return finish_board(board)
     if wants_json():
         return json_body(column_json(column, urls))
     return redirect(f"{g.slug}/boards/{board['id']}")
@@ -764,7 +738,8 @@ def column_move(slug, column_id):
         raise not_found()
     direction = -1 if request.form.get("direction") == "left" else 1
     store.move_column(conn(), g.user, column, direction)
-    return redirect(f"{g.slug}/boards/{column['board_id']}")
+    board = require_board(column["board_id"])
+    return finish_board(board)
 
 
 @bp.route("/<int:slug>/boards/<board_id>/publication", methods=["POST", "DELETE"])
@@ -884,8 +859,11 @@ def card_create(slug, board_id):
             )
     g.deliver = True
     urls = urls_for(g.account)
+    fresh = store.card_by_id(conn(), card["id"])
     if wants_json():
-        return json_body(card_json(conn(), store.card_by_id(conn(), card["id"]), urls, detailed=True), 201, urls("cards", card["number"]) + ".json")
+        return json_body(card_json(conn(), fresh, urls, detailed=True), 201, urls("cards", fresh["number"]) + ".json")
+    if request.headers.get("X-Fizzy-Fragment") == "card":
+        return _card_fragment(fresh, True)
     return redirect(f"{g.slug}/boards/{board['id']}")
 
 
@@ -934,8 +912,56 @@ def card_detail(slug, number):
         g.deliver = True
         if wants_json():
             return json_body(card_json(conn(), store.card_by_id(conn(), updated["id"]), urls, detailed=True))
+        if request.headers.get("X-Fizzy-Fragment") == "page":
+            return _card_sheet_response(number)
         flash("Card saved.")
         return redirect(f"{g.slug}/cards/{number}")
+    if wants_json():
+        return json_body(card_json(conn(), card, urls, detailed=True))
+    return render_template("card.html", **_card_page_context(card, board))
+
+
+def _board_stage_dict(board):
+    columns = store.columns_for(conn(), board["id"])
+    lanes = {
+        "maybe": [card_view(conn(), card, g.user["id"]) for card in store.lane_cards(conn(), board["id"], "maybe")],
+        "not_now": [card_view(conn(), card, g.user["id"]) for card in store.lane_cards(conn(), board["id"], "not_now")],
+        "closed": [card_view(conn(), card, g.user["id"]) for card in store.lane_cards(conn(), board["id"], "closed")],
+    }
+    column_views = []
+    for column in columns:
+        column_views.append({
+            "column": column,
+            "cards": [card_view(conn(), card, g.user["id"]) for card in store.column_cards(conn(), column["id"])],
+        })
+    filters = _card_filters()
+    filters["board_ids"] = [board["id"]]
+    filtering = bool(
+        request.args.get("indexed_by")
+        or request.args.get("q")
+        or request.args.get("creation")
+        or request.args.get("closure")
+        or multi("assignee_ids")
+        or multi("creator_ids")
+        or multi("tag_ids")
+    )
+    filtered = [card_view(conn(), card, g.user["id"]) for card in store.query_cards(conn(), g.user, filters, 60, 0)] if filtering else []
+    return {
+        "board": board,
+        "columns": column_views,
+        "lanes": lanes,
+        "filtering": filtering,
+        "filtered": filtered,
+    }
+
+
+def finish_board(board):
+    if request.headers.get("X-Fizzy-Fragment") == "board":
+        return render_template("_board_stage.html", **_board_stage_dict(board))
+    return redirect(f"{g.slug}/boards/{board['id']}")
+
+
+def _card_page_context(card, board):
     view = card_view(conn(), card, g.user["id"])
     comments = []
     for comment in store.comments_of(conn(), card["id"]):
@@ -946,20 +972,43 @@ def card_detail(slug, number):
             "author": store.user_by_id(conn(), comment["creator_id"]),
             "reactions": store.reactions_of(conn(), "Comment", comment["id"]),
         })
-    if wants_json():
-        return json_body(card_json(conn(), card, urls, detailed=True))
-    return render_template(
-        "card.html",
-        board=board,
-        view=view,
-        comments=comments,
-        reactions=store.reactions_of(conn(), "Card", card["id"]),
-        members=store.users_in_account(conn(), g.account["id"]),
-        columns=store.columns_for(conn(), board["id"]),
-        all_tags=store.tags_in_account(conn(), g.account["id"]),
-        boards=store.boards_for(conn(), g.user),
-        days=store.postpone_days(conn(), g.account["id"], board["id"]),
-    )
+    return {
+        "board": board,
+        "view": view,
+        "comments": comments,
+        "reactions": store.reactions_of(conn(), "Card", card["id"]),
+        "members": store.users_in_account(conn(), g.account["id"]),
+        "columns": store.columns_for(conn(), board["id"]),
+        "all_tags": store.tags_in_account(conn(), g.account["id"]),
+        "boards": store.boards_for(conn(), g.user),
+        "days": store.postpone_days(conn(), g.account["id"], board["id"]),
+    }
+
+
+def _card_sheet_response(number, anchor=""):
+    card, board = require_card(number)
+    html = render_template("_card_sheet.html", **_card_page_context(card, board))
+    pins = [
+        {"number": row["number"], "title": row["title"] or "Untitled"}
+        for row in store.pins_for_user(conn(), g.user)[:8]
+    ]
+    return json_body({
+        "html": html,
+        "title": f"{card['title'] or 'Card'} · Fizzy",
+        "boardName": board["name"],
+        "boardUrl": f"{g.slug}/boards/{board['id']}",
+        "anchor": anchor,
+        "pins": pins,
+    })
+
+
+def finish_card(number, anchor=""):
+    if request.headers.get("X-Fizzy-Fragment") == "page":
+        return _card_sheet_response(number, anchor)
+    url = f"{g.slug}/cards/{number}"
+    if anchor:
+        url += "#" + anchor.lstrip("#")
+    return redirect(url)
 
 
 def _activity_days(events):
@@ -1041,6 +1090,8 @@ def _card_action(slug, number, work):
         if result is not None and not isinstance(result, tuple):
             return result
         return json_body({}, 204)
+    if request.headers.get("X-Fizzy-Fragment") == "page":
+        return _card_sheet_response(number)
     if request.headers.get("X-Fizzy-Fragment") == "card":
         fresh = store.card_by_id(conn(), card["id"])
         path = request.path.rstrip("/")
@@ -1159,7 +1210,7 @@ def steps_create(slug, number):
     urls = urls_for(g.account)
     if wants_json():
         return json_body(step_json(step), 201, urls("cards", number, "steps", step["id"]) + ".json")
-    return redirect(f"{g.slug}/cards/{number}")
+    return finish_card(number)
 
 
 @bp.route("/<int:slug>/cards/<int:number>/steps/<step_id>", methods=["GET", "PUT", "POST", "DELETE"])
@@ -1176,7 +1227,7 @@ def step_detail(slug, number, step_id):
         store.delete_step(conn(), step)
         if wants_json():
             return json_body({}, 204)
-        return redirect(f"{g.slug}/cards/{number}")
+        return finish_card(number)
     if action in {"PUT", "PATCH"}:
         payload = form_body("step")
         updated = store.update_step(
@@ -1186,7 +1237,7 @@ def step_detail(slug, number, step_id):
         )
         if wants_json():
             return json_body(step_json(updated))
-        return redirect(f"{g.slug}/cards/{number}")
+        return finish_card(number)
     return json_body(step_json(step))
 
 
@@ -1203,7 +1254,7 @@ def comments(slug, number):
         g.deliver = True
         if wants_json():
             return json_body(comment_json(conn(), comment, urls, card), 201, urls("cards", number, "comments", comment["id"]) + ".json")
-        return redirect(f"{g.slug}/cards/{number}#comment-{comment['id']}")
+        return finish_card(number, f"comment-{comment['id']}")
     rows = store.comments_of(conn(), card["id"])
     _page, size, offset = page_window()
     window, headers = paginate(rows[offset:offset + size + 1])
@@ -1225,13 +1276,13 @@ def comment_detail(slug, number, comment_id):
         store.delete_comment(conn(), g.user, comment)
         if wants_json():
             return json_body({}, 204)
-        return redirect(f"{g.slug}/cards/{number}")
+        return finish_card(number)
     if action in {"PUT", "PATCH"}:
         payload = form_body("comment")
         updated = store.update_comment(conn(), g.user, comment, payload.get("body", ""))
         if wants_json():
             return json_body(comment_json(conn(), updated, urls, card))
-        return redirect(f"{g.slug}/cards/{number}#comment-{comment_id}")
+        return finish_card(number, f"comment-{comment_id}")
     return json_body(comment_json(conn(), comment, urls, card))
 
 
@@ -1247,7 +1298,7 @@ def card_reactions(slug, number):
         reaction = store.add_reaction(conn(), g.user, card["account_id"], "Card", card["id"], payload.get("content", ""))
         if wants_json():
             return json_body(reaction_json(conn(), reaction, urls, number), 201)
-        return redirect(f"{g.slug}/cards/{number}")
+        return finish_card(number)
     rows = store.reactions_of(conn(), "Card", card["id"])
     return json_body([reaction_json(conn(), row, urls, number) for row in rows])
 
@@ -1263,7 +1314,7 @@ def card_reaction_delete(slug, number, reaction_id):
     store.delete_reaction(conn(), g.user, reaction_id)
     if wants_json():
         return json_body({}, 204)
-    return redirect(f"{g.slug}/cards/{number}")
+    return finish_card(number)
 
 
 @bp.route("/<int:slug>/cards/<int:number>/comments/<comment_id>/reactions", methods=["GET", "POST"])
@@ -1281,7 +1332,7 @@ def comment_reactions(slug, number, comment_id):
         reaction = store.add_reaction(conn(), g.user, card["account_id"], "Comment", comment["id"], payload.get("content", ""))
         if wants_json():
             return json_body(reaction_json(conn(), reaction, urls, number, comment_id), 201)
-        return redirect(f"{g.slug}/cards/{number}#comment-{comment_id}")
+        return finish_card(number, f"comment-{comment_id}")
     rows = store.reactions_of(conn(), "Comment", comment["id"])
     return json_body([reaction_json(conn(), row, urls, number, comment_id) for row in rows])
 
@@ -1297,7 +1348,7 @@ def comment_reaction_delete(slug, number, comment_id, reaction_id):
     store.delete_reaction(conn(), g.user, reaction_id)
     if wants_json():
         return json_body({}, 204)
-    return redirect(f"{g.slug}/cards/{number}#comment-{comment_id}")
+    return finish_card(number, f"comment-{comment_id}")
 
 
 # --- people, tags, notifications, account ---------------------------------

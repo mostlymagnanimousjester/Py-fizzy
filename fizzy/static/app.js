@@ -520,6 +520,13 @@
     return plain !== (desc.dataset.originalPlain || "") || html !== (desc.dataset.originalHtml || "");
   }
 
+  function rememberDescription(root) {
+    (root || document).querySelectorAll(".card__description").forEach(function (desc) {
+      desc.dataset.originalHtml = desc.innerHTML.trim();
+      desc.dataset.originalPlain = desc.innerText.replace(/\s+/g, " ").trim();
+    });
+  }
+
   function saveCardFields(editForm) {
     const titleInput = editForm.querySelector("[name='card[title]']");
     const desc = editForm.querySelector(".card__description");
@@ -538,7 +545,10 @@
     if (!dirty) return Promise.resolve(true);
     return fetch(editForm.action, { method: "POST", body: body, credentials: "same-origin" }).then(function (response) {
       if (!response.ok) return false;
-      if (titleInput) titleInput.defaultValue = titleInput.value;
+      if (titleInput) {
+        titleInput.defaultValue = titleInput.value;
+        document.title = (titleInput.value || "Card") + " · Fizzy";
+      }
       if (desc) {
         desc.dataset.originalHtml = desc.innerHTML.trim();
         desc.dataset.originalPlain = desc.innerText.replace(/\s+/g, " ").trim();
@@ -547,56 +557,151 @@
     });
   }
 
-  const editForm = document.querySelector("form.card__edit");
-  if (editForm) {
-    const titleInput = editForm.querySelector("[name='card[title]']");
-    const desc = editForm.querySelector(".card__description");
-    if (desc) {
-      desc.dataset.originalHtml = desc.innerHTML.trim();
-      desc.dataset.originalPlain = desc.innerText.replace(/\s+/g, " ").trim();
-      desc.addEventListener("focusout", function () {
-        saveCardFields(editForm);
-      });
+  function applyCardSheet(payload) {
+    const sheet = document.getElementById("card-sheet");
+    if (!sheet || !payload || !payload.html) return;
+    const scroll = window.scrollY;
+    sheet.innerHTML = payload.html;
+    rememberDescription(sheet);
+    paintBubbles(sheet);
+    if (payload.title) document.title = payload.title;
+    const back = document.querySelector("[data-back]");
+    if (back && payload.boardUrl) {
+      back.setAttribute("href", payload.boardUrl);
+      back.textContent = payload.boardName || back.textContent;
     }
-    if (titleInput) {
-      titleInput.addEventListener("keydown", function (event) {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          titleInput.blur();
+    const tray = document.getElementById("pins-tray");
+    if (tray && payload.pins) {
+      const more = slug + "/my/pins";
+      const items = payload.pins.map(function (pin) {
+        return '<a class="tray__item" href="' + slug + "/cards/" + pin.number + '">#' + escapeHtml(pin.number) + " " + escapeHtml(pin.title) + "</a>";
+      }).join("");
+      tray.innerHTML = (items || '<p class="tray__empty">No pins yet.</p>') + '<a class="tray__more" href="' + more + '">All pins</a>';
+    }
+    if (payload.anchor) {
+      const node = document.getElementById(String(payload.anchor).replace("#", ""));
+      if (node) node.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    window.scrollTo(0, scroll);
+  }
+
+  function refreshBoardStage(html) {
+    const stage = document.getElementById("board-stage");
+    if (!stage) return;
+    stage.innerHTML = html;
+    if (boardRoot()) restoreColumns();
+    paintBubbles(stage);
+  }
+
+  function postForm(form, submitter, headers) {
+    const body = new FormData(form);
+    if (submitter && submitter.name) {
+      body.delete(submitter.name);
+      body.set(submitter.name, submitter.value);
+    }
+    const action = (submitter && submitter.getAttribute("formaction")) || form.action;
+    return fetch(action, { method: "POST", body: body, credentials: "same-origin", headers: headers || {} });
+  }
+
+  rememberDescription(document);
+
+  document.addEventListener("focusout", function (event) {
+    const form = event.target.closest && event.target.closest("form.card__edit");
+    if (!form) return;
+    if (event.target.matches("[name='card[title]'], .card__description")) saveCardFields(form);
+  });
+
+  document.addEventListener("submit", function (event) {
+    const form = event.target;
+    if (!form || form.classList.contains("danger") || (form.getAttribute("method") || "").toLowerCase() === "dialog") return;
+    const sheet = form.closest("#card-sheet");
+    const adding = form.classList.contains("add-card");
+    const columnForm = form.closest(".cards__menu, .cards__new");
+    if (!sheet && !adding && !columnForm) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const submitter = event.submitter;
+    if (adding) {
+      postForm(form, submitter, { "X-Fizzy-Fragment": "card" }).then(function (response) {
+        if (!response.ok) {
+          window.alert("Could not add that card.");
+          return null;
+        }
+        return response.json();
+      }).then(function (payload) {
+        if (!payload || !payload.html) return;
+        const column = form.closest("section.cards");
+        const list = column && column.querySelector(".cards__list");
+        if (!list) return;
+        const empty = list.querySelector(".empty");
+        if (empty) empty.remove();
+        const template = document.createElement("template");
+        template.innerHTML = payload.html.trim();
+        const card = template.content.querySelector("article.card");
+        if (!card) return;
+        list.prepend(card);
+        recount(column);
+        paintBubble(card.querySelector(".bubble"));
+        selectCard(card);
+        const input = form.querySelector("[name='card[title]']");
+        if (input) {
+          input.value = "";
+          input.focus();
         }
       });
-      titleInput.addEventListener("blur", function () {
-        saveCardFields(editForm);
-      });
+      return;
     }
-    editForm.addEventListener("submit", function () {
-      const hidden = editForm.querySelector("[name='card[description]']");
-      if (!hidden || !desc) return;
-      if (descriptionChanged(desc)) {
-        hidden.disabled = false;
-        hidden.value = desc.innerHTML;
-      } else {
-        hidden.disabled = true;
-      }
-    });
-    document.querySelectorAll("form").forEach(function (form) {
-      if (form === editForm) return;
-      form.addEventListener("submit", function (event) {
-        if (event.defaultPrevented) return;
-        const pendingTitle = titleInput && titleInput.value !== titleInput.defaultValue;
-        const pendingDesc = desc && descriptionChanged(desc);
-        if (!pendingTitle && !pendingDesc) return;
-        event.preventDefault();
-        saveCardFields(editForm).then(function (ok) {
-          if (!ok) {
-            window.alert("Could not save the card before that change.");
-            return;
-          }
-          form.submit();
-        });
+    if (columnForm) {
+      postForm(form, submitter, { "X-Fizzy-Fragment": "board", Accept: "text/html" }).then(function (response) {
+        if (!response.ok) {
+          window.alert("Could not update that column.");
+          return;
+        }
+        return response.text().then(refreshBoardStage);
       });
-    });
-  }
+      return;
+    }
+    const edit = sheet.querySelector("form.card__edit");
+    const pending = edit && form !== edit && (
+      (edit.querySelector("[name='card[title]']") && edit.querySelector("[name='card[title]']").value !== edit.querySelector("[name='card[title]']").defaultValue)
+      || (edit.querySelector(".card__description") && descriptionChanged(edit.querySelector(".card__description")))
+    );
+    const send = function () {
+      if (form.classList.contains("card__edit")) {
+        const desc = form.querySelector(".card__description");
+        const hidden = form.querySelector("[name='card[description]']");
+        if (hidden && desc) {
+          if (descriptionChanged(desc)) {
+            hidden.disabled = false;
+            hidden.value = desc.innerHTML;
+          } else {
+            hidden.disabled = true;
+          }
+        }
+      }
+      postForm(form, submitter, { "X-Fizzy-Fragment": "page" }).then(function (response) {
+        if (!response.ok) {
+          window.alert("Could not update that card.");
+          return null;
+        }
+        return response.json();
+      }).then(function (payload) {
+        if (payload) applyCardSheet(payload);
+      });
+    };
+    if (pending) {
+      saveCardFields(edit).then(function (ok) {
+        if (!ok) {
+          window.alert("Could not save the card before that change.");
+          return;
+        }
+        send();
+      });
+      return;
+    }
+    send();
+  }, true);
 
   document.addEventListener("focusout", function (event) {
     const input = event.target.closest && event.target.closest(".step__content");
@@ -620,6 +725,12 @@
     const meta = event.metaKey || event.ctrlKey;
     const plain = !meta && !event.altKey && !event.shiftKey;
     const jump = dialogById("jump");
+
+    if (event.target.matches && event.target.matches("[name='card[title]']") && key === "Enter" && plain) {
+      event.preventDefault();
+      event.target.blur();
+      return;
+    }
 
     if (key === "Escape") {
       const open = document.querySelector("dialog[open]");
