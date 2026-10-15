@@ -1,12 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Activity · Fizzy{% endblock %}
+{% block header_title %}What changed{% endblock %}
 {% block body %}
 <section class="sheet">
-  <p class="kicker">{{ account.name }}</p>
-  <h1>What changed</h1>
   {% if events %}
+  {% set ns = namespace(day="") %}
   <ol class="feed">
     {% for event in events %}
+    {% set day = (event.created_at or "")[:10] %}
+    {% if day != ns.day %}
+    <li class="feed__day">{{ day }}</li>
+    {% set ns.day = day %}
+    {% endif %}
     <li>
       <a href="{{ event.url or slug + '/' }}">
         <strong>{{ event.description }}</strong>

@@ -274,6 +274,13 @@ def inject():
     user = getattr(g, "user", None)
     unread = store.unread_count(conn(), user["id"]) if user else 0
     boards = store.boards_for(conn(), user) if user else []
+    tray_pins = []
+    tray_notes = []
+    if user and account:
+        urls = Urls(request.host_url.rstrip("/"), account["external_account_id"])
+        for card in store.pins_for_user(conn(), user)[:8]:
+            tray_pins.append({"number": card["number"], "title": card["title"] or "Untitled"})
+        tray_notes = [notification_json(conn(), row, urls) for row in store.notifications_for(conn(), user, 8, 0)]
     return {
         "csrf_token": session.get("_csrf", ""),
         "identity": getattr(g, "identity", None),
@@ -282,6 +289,8 @@ def inject():
         "slug": getattr(g, "slug", ""),
         "unread": unread,
         "nav_boards": boards,
+        "tray_pins": tray_pins,
+        "tray_notes": tray_notes,
         "colors": COLUMN_COLORS,
         "color_label": color_label,
         "postpone_choices": POSTPONE_DAYS,
@@ -632,6 +641,18 @@ def board_detail(slug, board_id):
             "cards": [card_view(conn(), card, g.user["id"]) for card in store.column_cards(conn(), column["id"])],
         })
     published = store.publication(conn(), board["id"])
+    filters = _card_filters()
+    filters["board_ids"] = [board["id"]]
+    filtering = bool(
+        request.args.get("indexed_by")
+        or request.args.get("q")
+        or request.args.get("creation")
+        or request.args.get("closure")
+        or multi("assignee_ids")
+        or multi("creator_ids")
+        or multi("tag_ids")
+    )
+    filtered = [card_view(conn(), card, g.user["id"]) for card in store.query_cards(conn(), g.user, filters, 60, 0)] if filtering else []
     return render_template(
         "board.html",
         board=board,
@@ -639,6 +660,9 @@ def board_detail(slug, board_id):
         lanes=lanes,
         published=published,
         days=store.postpone_days(conn(), board["account_id"], board["id"]),
+        filtering=filtering,
+        filtered=filtered,
+        filters=filters,
     )
 
 
@@ -928,6 +952,7 @@ def card_detail(slug, number):
         columns=store.columns_for(conn(), board["id"]),
         all_tags=store.tags_in_account(conn(), g.account["id"]),
         boards=store.boards_for(conn(), g.user),
+        days=store.postpone_days(conn(), g.account["id"], board["id"]),
     )
 
 
@@ -1015,6 +1040,13 @@ def card_tag(slug, number):
         payload = form_body("tagging")
         title = payload.get("tag_title") or request.form.get("tag_title") or ""
         store.toggle_tag(conn(), g.user, card, title)
+    return _card_action(slug, number, work)
+
+
+@bp.route("/<int:slug>/cards/<int:number>/self_assignment", methods=["POST"])
+def card_self_assign(slug, number):
+    def work(card, _board):
+        store.toggle_assignment(conn(), g.user, card, g.user["id"])
     return _card_action(slug, number, work)
 
 

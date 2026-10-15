@@ -1,6 +1,6 @@
 # Fizzy
 
-A local Flask board for a [Fizzy](https://github.com/basecamp/fizzy) SQLite database. It is a personal kanban: wide columns for Maybe, the workflow you name, Not now, and Done, plus the JSON API Fizzy documents.
+A local Flask board for a [Fizzy](https://github.com/basecamp/fizzy) SQLite database. Maybe stays in the center, Not Now and Done sit on collapsed rails, and the JSON API Fizzy documents is included. `J` opens the menu, `K` searches, and `[` `]` move a card to Not Now or Done.
 
 The app binds to `127.0.0.1`. It speaks SQLite only. Point it at a database the Ruby app already created and the same rows stay readable.
 
@@ -13,6 +13,8 @@ python -m venv .venv
 ```
 
 Open http://127.0.0.1:47621 . The first visit can create an account in `instance/fizzy.sqlite3`. Sign-in codes are shown on the next page because nothing is emailed.
+
+On a board, `J` opens the jump menu, `K` search, `P` pins, and `N` the inbox. Arrows move between columns and cards, Enter opens a card, `[` sends it to Not Now, `]` marks it Done, and `M` assigns it to you. On a card, `D` completes it, `E` edits the title, `T` tags, `A` assigns, Shift+`G` toggles gold, and Esc or Left goes back. Shortcuts stay quiet while you are typing.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

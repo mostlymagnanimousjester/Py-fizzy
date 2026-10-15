@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
-from .codec import iso
+from datetime import timedelta
+
+from .codec import iso, parse_dt, utcnow
 from .constants import COLOR_NAMES
 from .store import (
     api_particulars,
     assignees_of,
     attachment_blob,
     closure_of,
+    board_by_id,
     column_by_id,
+    columns_for,
     comments_of,
     describe_event,
     frequency_name,
     gold_of,
     has_extra_attachments,
     not_now_of,
+    spike_of,
     postpone_days,
     publication,
     reactions_of,
@@ -295,6 +300,30 @@ def color_label(value: str) -> str:
     return COLOR_NAMES.get(value, value)
 
 
+def _ago(value) -> str:
+    parsed = parse_dt(value)
+    if parsed is None:
+        return ""
+    days = (utcnow().date() - parsed.date()).days
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "yesterday"
+    return f"{days}d ago"
+
+
+def _stamp(conn, row, title: str):
+    if not row:
+        return None
+    who = user_by_id(conn, row.get("user_id")) if row.get("user_id") else None
+    when = parse_dt(row.get("created_at"))
+    return {
+        "title": title,
+        "date": when.strftime("%b %d, %Y") if when else "",
+        "by": who["name"] if who else "",
+    }
+
+
 def card_view(conn, card: dict, user_id: str | None = None) -> dict:
     from .store import is_pinned, is_watching
 
@@ -303,8 +332,26 @@ def card_view(conn, card: dict, user_id: str | None = None) -> dict:
     done = sum(1 for step in steps if step["completed"])
     image = attachment_blob(conn, "Card", card["id"], "image")
     column = column_by_id(conn, card["column_id"]) if card.get("column_id") else None
+    board = board_by_id(conn, card["board_id"])
+    closure = closure_of(conn, card["id"])
+    postponed = not_now_of(conn, card["id"])
+    period_days = postpone_days(conn, card["account_id"], card["board_id"])
+    last_active = parse_dt(card.get("last_active_at"))
+    closes_at = last_active + timedelta(days=period_days) if last_active else None
+    spike = spike_of(conn, card["id"])
+    stalled_at = ""
+    if spike and not closure and not postponed:
+        spiked = parse_dt(spike.get("updated_at"))
+        updated = parse_dt(card.get("updated_at"))
+        if spiked and updated and (utcnow() - spiked).days >= 14 and (utcnow() - updated).days >= 14:
+            stalled_at = iso(spiked) or ""
+    stages = [
+        {"id": item["id"], "name": item["name"], "color": item["color"], "current": item["id"] == card.get("column_id")}
+        for item in columns_for(conn, card["board_id"])
+    ]
     return {
         "card": card,
+        "board_name": board["name"] if board else "",
         "description_html": (description["body"] if description else "") or "",
         "description_text": plain_text(description["body"] if description else ""),
         "tags": tags_for_card(conn, card["id"]),
@@ -313,15 +360,23 @@ def card_view(conn, card: dict, user_id: str | None = None) -> dict:
         "step_done": done,
         "step_total": len(steps),
         "comment_count": len(comments_of(conn, card["id"])),
+        "reaction_count": len(reactions_of(conn, "Card", card["id"])),
         "golden": gold_of(conn, card["id"]) is not None,
-        "closed": closure_of(conn, card["id"]) is not None,
-        "postponed": not_now_of(conn, card["id"]) is not None,
+        "closed": closure is not None,
+        "postponed": postponed is not None,
+        "stamp": _stamp(conn, closure, "Done") or _stamp(conn, postponed, "Not Now"),
         "image": image,
         "column": column,
+        "stages": stages,
         "color": (column["color"] if column else "var(--color-card-2)"),
         "pinned": is_pinned(conn, card["id"], user_id) if user_id else False,
         "watching": is_watching(conn, card["id"], user_id) if user_id else False,
         "creator": user_by_id(conn, card["creator_id"]),
+        "added_ago": _ago(card.get("created_at")),
+        "active_ago": _ago(card.get("last_active_at")),
+        "closes_at": iso(closes_at) if closes_at else "",
+        "reminder_days": max(round(period_days * 0.25), 1),
+        "stalled_at": stalled_at,
     }
 
 

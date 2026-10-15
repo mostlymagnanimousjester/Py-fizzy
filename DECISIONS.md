@@ -34,6 +34,17 @@ This is a personal localhost tool. The bar for each feature was: does a Fizzy SQ
 
 ## UX
 
-The board is a horizontal row of ~450px columns with tinted card bubbles. Column color is the CSS variable Fizzy stores (`var(--color-card-default)` through `var(--color-card-8)`). Dragging a card posts the same triage, not-now, close, or send-back actions the buttons use. The card page edits the title and description, steps, comments, tags, assignees, gold, pin, watch, and column.
+The board matches Fizzy’s three zones. Not Now is a collapsed rail on the left. Maybe stays expanded in the center on a wide window (450px) and its collapse control is disabled there. Workflow columns and Done are collapsed 40px rails on the right until one of them is opened beside Maybe. A narrow window keeps a single expanded column and scrolls sideways. Column color is the CSS variable Fizzy stores (`var(--color-card-default)` through `var(--color-card-8)`). Maybe cards sit on the canvas. Workflow cards pick up a tint of that variable. The card number lives in the colored board chip.
+
+The entropy bubble is a separate circle on the card. It appears when the days until auto-postpone are inside the reminder window (a quarter of the postpone period, rounded), with “Closes in / N / days”, or “Closes / ! / Today” when that is under a day. A stalled spike of at least 14 days shows “Stalled for / N / days” when the entropy bubble is quiet. Done and Not Now hide the bubble and show a stamp. Golden cards get the gold wash. Dragging a card posts the same triage, not-now, close, or send-back actions the buttons use.
+
+Keyboard shortcuts are part of the board. They are ignored while an input, textarea, select, or contenteditable is focused, except Esc and Ctrl/Cmd+Enter.
+
+- `J` or Ctrl/Cmd+`J` opens the jump menu. Inside it, `1` `2` `3` go Home, Assigned to me, and Added by me.
+- `K` focuses search. `P` opens pins. `N` opens the inbox.
+- Arrow keys move across columns and through the cards in the focused column. Enter opens the selected card.
+- `[` sends the selected card to Not Now. `]` marks it Done. `M` toggles assignment to you.
+- On a card: `D` marks Done, `E` edits the title, `T` focuses tags, `A` focuses assignees, `M` assigns to you, Shift+`G` toggles gold, Shift+`P` pins, Shift+`N` watches. Ctrl/Cmd+Enter saves the focused form.
+- `F` focuses the board filter. Esc closes a dialog or the search field, then follows the back link. Left does the same on an inner page.
 
 A description is left untouched when the textarea still matches the current plain text, so opening a Ruby card and saving the title does not flatten Action Text HTML.

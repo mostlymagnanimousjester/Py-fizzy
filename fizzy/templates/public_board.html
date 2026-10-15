@@ -1,36 +1,27 @@
 {% extends "base.html" %}
 {% block title %}{{ board.name }} · Fizzy{% endblock %}
-{% block body_class %}board-page{% endblock %}
+{% block header_title %}{{ board.name }}{% endblock %}
+{% block body_class %}board-page public{% endblock %}
 {% block body %}
-<div class="board-head">
-  <div>
-    <p class="kicker">Published board</p>
-    <h1>{{ board.name }}</h1>
-    {% if description %}<div class="prose">{{ description|safe }}</div>{% endif %}
+{% if description %}<div class="prose public-note">{{ description|safe }}</div>{% endif %}
+<div class="card-columns" data-board="{{ board.id }}">
+  <div class="card-columns__left">
+    {% with lane="not_now", title="Not Now", cards=lanes.not_now, collapsed=true, color="var(--color-card-complete)", column=false %}
+      {% include "_column.html" %}
+    {% endwith %}
   </div>
-</div>
-<div class="columns">
-  <section class="column lane-maybe">
-    <header><h2>Maybe?</h2><span>{{ lanes.maybe|length }}</span></header>
-    <div class="stack">
-      {% for view in lanes.maybe %}{% include "_card.html" %}{% else %}<p class="empty">Nothing waiting.</p>{% endfor %}
-    </div>
-  </section>
-  {% for entry in columns %}
-  <section class="column" style="--card-color: {{ entry.column.color }}">
-    <header><h2><i class="swatch"></i>{{ entry.column.name }}</h2><span>{{ entry.cards|length }}</span></header>
-    <div class="stack">
-      {% for view in entry.cards %}{% include "_card.html" %}{% else %}<p class="empty">Empty column.</p>{% endfor %}
-    </div>
-  </section>
-  {% endfor %}
-  <section class="column lane-later">
-    <header><h2>Not now</h2><span>{{ lanes.not_now|length }}</span></header>
-    <div class="stack">{% for view in lanes.not_now %}{% include "_card.html" %}{% else %}<p class="empty">No postponed cards.</p>{% endfor %}</div>
-  </section>
-  <section class="column lane-done">
-    <header><h2>Done</h2><span>{{ lanes.closed|length }}</span></header>
-    <div class="stack">{% for view in lanes.closed %}{% include "_card.html" %}{% else %}<p class="empty">Nothing closed.</p>{% endfor %}</div>
-  </section>
+  {% with lane="maybe", title="Maybe?", cards=lanes.maybe, collapsed=false, color="", column=false %}
+    {% include "_column.html" %}
+  {% endwith %}
+  <div class="card-columns__right">
+    {% for entry in columns %}
+      {% with lane="", title=entry.column.name, cards=entry.cards, collapsed=true, color=entry.column.color, column=entry.column %}
+        {% include "_column.html" %}
+      {% endwith %}
+    {% endfor %}
+    {% with lane="closed", title="Done", cards=lanes.closed, collapsed=true, color="var(--color-card-complete)", column=false %}
+      {% include "_column.html" %}
+    {% endwith %}
+  </div>
 </div>
 {% endblock %}

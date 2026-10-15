@@ -982,6 +982,10 @@ def gold_of(conn, card_id: str):
     return q1(conn, "SELECT * FROM card_goldnesses WHERE card_id = ?", (_id(conn, "card_goldnesses", "card_id", card_id),))
 
 
+def spike_of(conn, card_id: str):
+    return q1(conn, "SELECT * FROM card_activity_spikes WHERE card_id = ?", (_id(conn, "card_activity_spikes", "card_id", card_id),))
+
+
 def _resume(conn, card: dict):
     closure = closure_of(conn, card["id"])
     if closure:
