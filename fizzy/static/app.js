@@ -56,7 +56,9 @@
   }
 
   function selectedCard() {
-    return document.querySelector('article.card[aria-selected="true"]');
+    const card = document.querySelector('article.card[aria-selected="true"]');
+    if (!card || (card.closest("section.cards") && card.closest("section.cards").classList.contains("is-collapsed"))) return null;
+    return card;
   }
 
   function showColumn(column) {
@@ -81,7 +83,10 @@
     }
     const cards = visibleCards(column);
     if (cards.length) selectCard(cards[0]);
-    else column.focus();
+    else {
+      selectCard(null);
+      column.focus();
+    }
   }
 
   function collapseSide(column) {
@@ -144,7 +149,10 @@
     else {
       const cards = visibleCards(next);
       if (cards.length) selectCard(cards[0]);
-      else next.focus();
+      else {
+        selectCard(null);
+        next.focus();
+      }
     }
   }
 
@@ -438,7 +446,7 @@
     if (plain && key === "Enter" && board) {
       const card = selectedCard();
       const link = card && card.querySelector(".card__link");
-      if (link && (card === document.activeElement || card.contains(document.activeElement))) {
+      if (link) {
         event.preventDefault();
         window.location.href = link.href;
       }
