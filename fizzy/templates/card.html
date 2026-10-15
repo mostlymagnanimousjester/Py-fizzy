@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ view.card.title or "Card" }} · Fizzy{% endblock %}
+{% block header_title %}{{ view.card.title or 'Card' }}{% endblock %}
 {% block header_end %}
   <a class="btn" data-back href="{{ slug }}/boards/{{ board.id }}">{{ board.name }}</a>
 {% endblock %}

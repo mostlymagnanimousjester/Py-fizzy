@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{% if board %}{{ board.name }} settings{% else %}New board{% endif %} · Fizzy{% endblock %}
+{% block header_title %}{% if board %}{{ board.name }}{% else %}New board{% endif %}{% endblock %}
 {% block header_end %}<a class="header__link back" data-back href="{% if board %}{{ slug }}/boards/{{ board.id }}{% else %}{{ slug }}/boards{% endif %}">{% if board %}{{ board.name }}{% else %}Boards{% endif %}</a>{% endblock %}
 {% block body %}
 <section class="sheet narrow">
