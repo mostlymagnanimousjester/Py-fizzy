@@ -1,27 +1,38 @@
 {% extends "base.html" %}
-{% block title %}Activity · Fizzy{% endblock %}
-{% block header_title %}What changed{% endblock %}
+{% block title %}Home · Fizzy{% endblock %}
+{% block header_title %}Latest Activity{% endblock %}
+{% block body_class %}events-page{% endblock %}
 {% block body %}
+{% if days %}
+<div class="events">
+  {% for day in days %}
+  <section class="events__day">
+    <h2>{{ day.label }}</h2>
+    <div class="events__columns">
+      {% for key, label in [("added", "Added"), ("updated", "Updated"), ("closed", "Done")] %}
+      <div class="events__column">
+        <h3>{{ label }}</h3>
+        {% for event in day[key] %}
+        <a class="event" href="{{ event.url }}" style="--card-color: {{ event.color }}">
+          <header class="card__header">
+            <span class="card__id">{{ event.number }}</span>
+            <span class="card__board-name">{{ event.board }}</span>
+          </header>
+          <p class="event__line"><i class="face">{{ event.who[:1] }}</i> <span>{{ event.description }}</span></p>
+          {% if event.time %}<time>{{ event.time }}</time>{% endif %}
+        </a>
+        {% else %}
+        <p class="events__quiet">Quiet</p>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% else %}
 <section class="sheet">
-  {% if events %}
-  {% set ns = namespace(day="") %}
-  <ol class="feed">
-    {% for event in events %}
-    {% set day = (event.created_at or "")[:10] %}
-    {% if day != ns.day %}
-    <li class="feed__day">{{ day }}</li>
-    {% set ns.day = day %}
-    {% endif %}
-    <li>
-      <a href="{{ event.url or slug + '/' }}">
-        <strong>{{ event.description }}</strong>
-        <span>{{ event.created_at }}</span>
-      </a>
-    </li>
-    {% endfor %}
-  </ol>
-  {% else %}
   <p class="empty">Nothing has happened yet. <a href="{{ slug }}/boards/new">Create a board</a> and publish a card.</p>
-  {% endif %}
 </section>
+{% endif %}
 {% endblock %}

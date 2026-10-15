@@ -1,0 +1,41 @@
+{% if filtering %}
+<div class="cards-grid">
+  {% for view in filtered %}{% include "_card.html" %}{% else %}
+  <p class="empty">Nothing matches this filter.</p>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card-columns" data-board="{{ board.id }}">
+  <div class="card-columns__left">
+    {% with lane="not_now", title="Not Now", cards=lanes.not_now, collapsed=true, color="var(--color-card-complete)", column=false %}
+      {% include "_column.html" %}
+    {% endwith %}
+  </div>
+  {% with lane="maybe", title="Maybe?", cards=lanes.maybe, collapsed=false, color="", column=false %}
+    {% include "_column.html" %}
+  {% endwith %}
+  <div class="card-columns__right">
+    {% for entry in columns %}
+      {% with lane="", title=entry.column.name, cards=entry.cards, collapsed=true, color=entry.column.color, column=entry.column %}
+        {% include "_column.html" %}
+      {% endwith %}
+    {% endfor %}
+    {% with lane="closed", title="Done", cards=lanes.closed, collapsed=true, color="var(--color-card-complete)", column=false %}
+      {% include "_column.html" %}
+    {% endwith %}
+    <section class="cards__new">
+      <button type="button" class="cards__new-toggle">New column</button>
+      <form method="post" action="{{ slug }}/boards/{{ board.id }}/columns" hidden>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input name="column[name]" placeholder="New column" required maxlength="255" aria-label="Column name">
+        <select name="column[color]" aria-label="Column color">
+          {% for name, value in colors %}
+          <option value="{{ value }}">{{ name }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">Add</button>
+      </form>
+    </section>
+  </div>
+</div>
+{% endif %}

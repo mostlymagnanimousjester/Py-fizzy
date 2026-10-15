@@ -37,7 +37,8 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="_method" value="put">
         <input class="card__title-input" name="card[title]" value="{{ view.card.title or '' }}" maxlength="255" aria-label="Title" data-hotkey-target="edit">
-        <textarea name="card[description]" rows="5" aria-label="Description" placeholder="What needs doing?">{{ view.description_text }}</textarea>
+        <div class="card__description" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Description" data-plain="{{ view.description_text }}">{{ view.description_html|safe }}</div>
+        <input type="hidden" name="card[description]" value="">
         <div class="row">
           <button type="submit" data-hotkey="save">Save <kbd>⌘↩</kbd></button>
           <label class="file">Image <input type="file" name="card[image]" accept="image/jpeg,image/png,image/gif,image/webp"></label>
@@ -77,7 +78,7 @@
             <input type="hidden" name="step[completed]" value="{{ 'false' if step.completed else 'true' }}">
             <button type="submit" class="check{% if step.completed %} on{% endif %}" aria-label="Toggle step">{{ "✓" if step.completed else "" }}</button>
           </form>
-          <span class="{% if step.completed %}done{% endif %}">{{ step.content }}</span>
+          <input class="step__content{% if step.completed %} done{% endif %}" value="{{ step.content }}" aria-label="Step" data-url="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
           <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="_method" value="delete">

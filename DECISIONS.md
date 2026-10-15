@@ -14,6 +14,7 @@ This is a personal localhost tool. The bar for each feature was: does a Fizzy SQ
 - **In-app notifications.** One row per user and card; a new event clears `read_at` and bumps `unread_count`. Push tables exist for a swapped file and are never written.
 - **Webhooks.** HMAC-SHA256 hex in `X-Webhook-Signature`, plus timestamp and `fizzy/1.0.0 Webhook`. Delivery happens before the response returns. Slack URLs get `{text}`. Other URLs get the activity JSON. Link-local addresses and `169.254.169.254` are refused. Localhost and private LAN are allowed, because this process never leaves the machine. A failed post is stored as `errored` and is not retried.
 - **Search.** `LIKE` on title, description, and card number. `search_queries` rows are recorded. The FTS table is not queried.
+- **Activity spikes.** A published card gets a `card_activity_spikes` row when it is assigned, reopened, or commented on by two people at least three times in the last third of the postpone window. The row is touched, matching Ruby’s detector, so a swapped file and this app share the stalled bubble.
 - **Exports.** A zip of `cards/N.json` plus `manifest.json`, marked completed in the same request. It is a readable archive, not Fizzy’s data-transfer package. Account export is limited to owners and admins.
 - **REST API.** Documented resources: identity, tokens, account, boards, columns, cards, steps, comments, reactions, tags, users, activity, notifications, pins, webhooks, deliveries, exports. Pagination is 30 rows and a `Link: rel=next` header. ETags are a hash of the JSON body.
 - **Published boards.** A key in `board_publications` serves a read-only column view. Card images on a published board can be fetched without a session. Avatars without a file return an initials SVG.
@@ -25,7 +26,6 @@ This is a personal localhost tool. The bar for each feature was: does a Fizzy SQ
 - **Passkeys, identity transfer, QR login, PWA, native shell.**
 - **SaaS, billing, account cancellation jobs, imports from other products.**
 - **Background jobs.** Auto-postpone, webhook delivery, and exports run in the request that needs them.
-- **Activity-spike detection.** The stalled filter reads `card_activity_spikes` if Ruby already wrote them. This app does not create spikes.
 - **Saved filters.** Query-string filters are implemented. The `filters` tables are not written.
 - **MySQL, multi-db, replicas.**
 - **Rails session signing, rate limits, and Surfguard’s public-only webhook policy.** CSRF still covers HTML forms. JSON with a bearer token or `Content-Type: application/json` does not send a form token. There is no CORS.
@@ -36,7 +36,9 @@ This is a personal localhost tool. The bar for each feature was: does a Fizzy SQ
 
 The board matches Fizzy’s three zones. Not Now is a collapsed rail on the left. Maybe stays expanded in the center on a wide window (450px) and its collapse control is disabled there. Workflow columns and Done are collapsed 40px rails on the right until one of them is opened beside Maybe. A narrow window keeps a single expanded column and scrolls sideways. Column color is the CSS variable Fizzy stores (`var(--color-card-default)` through `var(--color-card-8)`). Maybe cards sit on the canvas. Workflow cards pick up a tint of that variable. The card number lives in the colored board chip.
 
-The entropy bubble is a separate circle on the card. It appears when the days until auto-postpone are inside the reminder window (a quarter of the postpone period, rounded), with “Closes in / N / days”, or “Closes / ! / Today” when that is under a day. A stalled spike of at least 14 days shows “Stalled for / N / days” when the entropy bubble is quiet. Done and Not Now hide the bubble and show a stamp. Golden cards get the gold wash. Dragging a card posts the same triage, not-now, close, or send-back actions the buttons use.
+The entropy bubble is a separate circle on the card. It appears when the days until auto-postpone are inside the reminder window (a quarter of the postpone period, rounded), with “Closes in / N / days”, or “Closes / ! / Today” when that is under a day. A stalled spike of at least 14 days shows “Stalled for / N / days” when the entropy bubble is quiet. Done stamps stay off workflow and Maybe cards; Not Now and the card page still show them. Golden cards get the gold wash.
+
+Dragging a card, or pressing `[` `]` `M`, posts the same triage, not-now, close, or assign action and swaps the card markup in place. The next card in the column stays selected, and the open column stays open. `K` keeps search in the bottom bar and lists matches while you type. Home is a day timeline with Added, Updated, and Done columns. Title and description save when they blur; an unchanged description is not written, so Ruby Action Text stays intact. `F` focuses the board find field, which narrows the board as you type. Esc and Left follow the back link on inner pages.
 
 Keyboard shortcuts are part of the board. They are ignored while an input, textarea, select, or contenteditable is focused, except Esc and Ctrl/Cmd+Enter.
 

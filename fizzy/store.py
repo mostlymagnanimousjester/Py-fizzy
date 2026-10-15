@@ -19,7 +19,7 @@ from .constants import (
     STALLED_DAYS,
     WEBHOOK_ACTIONS,
 )
-from .db import delete_where, enc, insert, q, q1, update
+from .db import delete_where, enc, insert, q, q1, update as write_row
 from .errors import FizzyError, forbidden, invalid, not_found
 from .text import mention_ids_from_html, plain_text, to_html
 
@@ -38,6 +38,14 @@ def require(row, message="Not found"):
     if row is None:
         raise not_found(message)
     return row
+
+
+def update(conn, table, row_id, **cols):
+    write_row(conn, table, row_id, **cols)
+    if table == "cards" and "last_active_at" in cols:
+        fresh = card_by_id(conn, row_id)
+        if fresh and fresh.get("status") == "published":
+            detect_activity_spike(conn, fresh)
 
 
 # --- identity, session, tokens ---------------------------------------------
@@ -899,10 +907,11 @@ def update_card(conn, user: dict, card: dict, *, title=None, description=None, s
     if status is not None:
         if status not in {"drafted", "published"}:
             raise invalid({"status": ["must be drafted or published"]})
-        cols["status"] = status
+        if status != card["status"]:
+            cols["status"] = status
     if last_active_at is not None:
         cols["last_active_at"] = parse_dt(last_active_at) or utcnow()
-    else:
+    if (cols or description is not None or tag_titles is not None) and "last_active_at" not in cols:
         cols["last_active_at"] = utcnow()
     if cols:
         update(conn, "cards", card["id"], **cols)
@@ -984,6 +993,45 @@ def gold_of(conn, card_id: str):
 
 def spike_of(conn, card_id: str):
     return q1(conn, "SELECT * FROM card_activity_spikes WHERE card_id = ?", (_id(conn, "card_activity_spikes", "card_id", card_id),))
+
+
+def detect_activity_spike(conn, card: dict) -> bool:
+    """Ruby Card::ActivitySpike::Detector. Touch the spike row when an entropic card just got busy."""
+    if not card or card.get("status") != "published" or not card.get("last_active_at"):
+        return False
+    period_days = postpone_days(conn, card["account_id"], card["board_id"])
+    recent_start = utcnow() - timedelta(seconds=period_days * 86400 * 0.33)
+    comments = q(
+        conn,
+        "SELECT creator_id FROM comments WHERE card_id = ? AND created_at >= ?",
+        (_id(conn, "comments", "card_id", card["id"]), dump_dt(recent_start)),
+    )
+    spiked = len(comments) >= 3 and len({row["creator_id"] for row in comments}) >= 2
+    if not spiked:
+        last = q1(
+            conn,
+            """
+            SELECT action, created_at FROM events
+            WHERE eventable_type = 'Card' AND eventable_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (_id(conn, "events", "eventable_id", card["id"]),),
+        )
+        when = parse_dt(last["created_at"]) if last else None
+        if last and when and when > utcnow() - timedelta(minutes=1):
+            if last["action"] == "card_assigned" and assignees_of(conn, card["id"]):
+                spiked = True
+            elif last["action"] == "card_reopened" and closure_of(conn, card["id"]) is None:
+                spiked = True
+    if not spiked:
+        return False
+    existing = spike_of(conn, card["id"])
+    if existing:
+        write_row(conn, "card_activity_spikes", existing["id"])
+    else:
+        insert(conn, "card_activity_spikes", account_id=card["account_id"], card_id=card["id"])
+    return True
 
 
 def _resume(conn, card: dict):

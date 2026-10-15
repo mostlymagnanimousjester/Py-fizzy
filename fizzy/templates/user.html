@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ person.name }} · Fizzy{% endblock %}
+{% block header_end %}<a class="header__link back" data-back href="{{ slug }}/users">People</a>{% endblock %}
 {% block body %}
 <section class="sheet narrow">
   <p class="kicker"><a href="{{ slug }}/users">People</a></p>

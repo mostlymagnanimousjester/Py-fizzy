@@ -1,6 +1,6 @@
 # Fizzy
 
-A local Flask board for a [Fizzy](https://github.com/basecamp/fizzy) SQLite database. Maybe stays in the center, Not Now and Done sit on collapsed rails, and the JSON API Fizzy documents is included. `J` opens the menu, `K` searches, and `[` `]` move a card to Not Now or Done.
+A local Flask board for a [Fizzy](https://github.com/basecamp/fizzy) SQLite database. Maybe stays in the center, Not Now and Done sit on collapsed rails, and the JSON API Fizzy documents is included. `J` opens the menu, `K` searches in the bottom bar, and `[` `]` move a card to Not Now or Done without reloading the board.
 
 The app binds to `127.0.0.1`. It speaks SQLite only. Point it at a database the Ruby app already created and the same rows stay readable.
 

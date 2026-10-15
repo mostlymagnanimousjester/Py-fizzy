@@ -301,6 +301,17 @@ class ApiTests(unittest.TestCase):
         self.assertIn('data-hotkey="gold"', card_html)
         self.assertIn('data-hotkey="postpone"', card_html)
         self.assertIn("after 30 quiet days", card_html)
+        token = re.search(r'name="csrf_token" value="([^"]+)"', card_html).group(1)
+        moved = self.client.post(
+            card_href + "/closure",
+            data={"csrf_token": token},
+            headers={"X-Fizzy-Fragment": "card"},
+        )
+        self.assertEqual(moved.status_code, 200, moved.get_data(as_text=True))
+        fragment = moved.get_json()
+        self.assertEqual(fragment["lane"], "closed")
+        self.assertIn("COBOL", fragment["html"])
+        self.assertFalse(fragment["stay"])
 
         self.client.post("/logout", data={"csrf_token": token, "_method": "delete"})
         login = self.client.get("/login")
@@ -310,7 +321,8 @@ class ApiTests(unittest.TestCase):
         code = re.search(r"Your code is ([0-9A-Z]+)", code_html).group(1)
         token = re.search(r'name="csrf_token" value="([^"]+)"', code_html).group(1)
         home = self.client.post("/login/code", data={"csrf_token": token, "code": code}, follow_redirects=True)
-        self.assertIn("What changed", home.get_data(as_text=True))
+        self.assertIn("Latest Activity", home.get_data(as_text=True))
+        self.assertIn("Added", home.get_data(as_text=True))
 
 
 class SwapTests(unittest.TestCase):

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Export · Fizzy{% endblock %}
+{% block header_end %}<a class="header__link back" data-back href="{{ slug }}/">Home</a>{% endblock %}
 {% block body %}
 <section class="sheet narrow">
   <p class="kicker">{{ export.status }}</p>

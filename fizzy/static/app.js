@@ -2,7 +2,6 @@
   const token = document.querySelector('meta[name="csrf-token"]');
   const csrf = token ? token.getAttribute("content") : "";
   const slug = document.body.dataset.slug || "";
-  const board = document.querySelector(".card-columns");
   const desktopQuery = window.matchMedia("(min-width: 640px)");
 
   function typing(event) {
@@ -11,8 +10,13 @@
     return !!target.closest("input, textarea, select, [contenteditable]");
   }
 
+  function boardRoot() {
+    return document.querySelector(".card-columns");
+  }
+
   function columns() {
-    return board ? Array.from(board.querySelectorAll("section.cards")) : [];
+    const root = boardRoot();
+    return root ? Array.from(root.querySelectorAll("section.cards")) : [];
   }
 
   function isDesktop() {
@@ -20,7 +24,8 @@
   }
 
   function storageKey(column) {
-    return "expand-" + (board ? board.dataset.board : "") + "-" + column.id;
+    const root = boardRoot();
+    return "expand-" + (root ? root.dataset.board : "") + "-" + column.id;
   }
 
   function setExpanded(column, on) {
@@ -101,7 +106,8 @@
   }
 
   function restoreColumns() {
-    if (!board) return;
+    const root = boardRoot();
+    if (!root) return;
     const saved = columns().filter(function (column) {
       return column.id !== "lane-maybe" && localStorage.getItem(storageKey(column));
     });
@@ -159,12 +165,128 @@
   function moveCard(direction) {
     const column = activeColumn();
     const cards = visibleCards(column);
+    if (!cards.length) {
+      moveGrid(direction);
+      return;
+    }
+    const current = selectedCard();
+    let index = cards.indexOf(current);
+    if (index < 0) index = direction > 0 ? -1 : cards.length;
+    const next = cards[index + direction];
+    if (next) selectCard(next);
+  }
+
+  function moveGrid(direction) {
+    const grid = document.querySelector(".cards-grid, .card-grid");
+    if (!grid) return;
+    const cards = Array.from(grid.querySelectorAll("article.card"));
     if (!cards.length) return;
     const current = selectedCard();
     let index = cards.indexOf(current);
     if (index < 0) index = direction > 0 ? -1 : cards.length;
     const next = cards[index + direction];
     if (next) selectCard(next);
+  }
+
+  function recount(column) {
+    if (!column) return;
+    const count = column.querySelectorAll(".cards__list article.card").length;
+    column.style.setProperty("--card-count", String(count));
+    column.dataset.cardCount = String(count);
+  }
+
+  function escapeHtml(value) {
+    return String(value || "").replace(/[&<>"']/g, function (char) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char];
+    });
+  }
+
+  function utcDay(date) {
+    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  }
+
+  function dayDiff(from, to) {
+    return Math.round((utcDay(to) - utcDay(from)) / 86400000);
+  }
+
+  function paintBubble(bubble) {
+    if (!bubble) return;
+    const closes = bubble.dataset.closesAt;
+    const reminder = Number(bubble.dataset.reminderDays || "0");
+    const stalled = bubble.dataset.stalledAt;
+    let top = "";
+    let center = "";
+    let bottom = "";
+    if (closes) {
+      const days = dayDiff(new Date(), new Date(closes));
+      if (days < reminder) {
+        if (days < 1) {
+          top = "Closes";
+          center = "!";
+          bottom = "Today";
+        } else {
+          top = "Closes in";
+          center = String(days);
+          bottom = days === 1 ? "day" : "days";
+        }
+      }
+    }
+    if (!top && stalled) {
+      const days = Math.max(dayDiff(new Date(stalled), new Date()), 0);
+      top = "Stalled for";
+      center = String(days);
+      bottom = "days";
+    }
+    if (!top) {
+      bubble.hidden = true;
+      return;
+    }
+    bubble.querySelectorAll("[data-bubble]").forEach(function (node) {
+      const slot = node.getAttribute("data-bubble");
+      node.textContent = slot === "top" ? top : slot === "center" ? center : bottom;
+    });
+    const turns = [-8, 6, -4, 11, -12, 3, 9];
+    const index = Number((bubble.closest("article") || {}).dataset.number || 0);
+    bubble.style.setProperty("--bubble-rotate", turns[index % turns.length] + "deg");
+    bubble.hidden = false;
+  }
+
+  function paintBubbles(root) {
+    (root || document).querySelectorAll(".bubble").forEach(paintBubble);
+  }
+
+  function placeCard(payload) {
+    const template = document.createElement("template");
+    template.innerHTML = (payload.html || "").trim();
+    const fresh = template.content.querySelector("article.card");
+    if (!fresh) return;
+    const current = document.querySelector('article.card[data-number="' + payload.number + '"]');
+    const sourceColumn = current && current.closest("section.cards");
+    let neighbor = null;
+    if (current) {
+      neighbor = current.nextElementSibling && current.nextElementSibling.matches("article.card")
+        ? current.nextElementSibling
+        : current.previousElementSibling;
+      if (neighbor && !neighbor.matches("article.card")) neighbor = null;
+      current.replaceWith(fresh);
+    }
+    const target = document.getElementById("lane-" + payload.lane) || document.getElementById("column-" + payload.lane);
+    const list = target && target.querySelector(".cards__list");
+    if (list && !list.contains(fresh)) {
+      if (fresh.classList.contains("golden-effect")) list.prepend(fresh);
+      else list.appendChild(fresh);
+    }
+    recount(sourceColumn);
+    recount(target);
+    paintBubble(fresh.querySelector(".bubble"));
+    if (payload.stay) {
+      selectCard(fresh);
+      return;
+    }
+    const home = neighbor && neighbor.closest("section.cards");
+    if (neighbor && neighbor.isConnected && home && visibleCards(home).indexOf(neighbor) >= 0) selectCard(neighbor);
+    else if (neighbor && neighbor.isConnected && neighbor.closest(".cards-grid, .card-grid")) selectCard(neighbor);
+    else selectCard(null);
   }
 
   function post(url, fields) {
@@ -175,9 +297,20 @@
         body.append(key, fields[key]);
       });
     }
-    return fetch(url, { method: "POST", body: body, credentials: "same-origin" }).then(function (response) {
-      if (response.ok) window.location.reload();
-      else window.alert("Could not update that card.");
+    const headers = {};
+    if (boardRoot() || document.querySelector(".cards-grid")) headers["X-Fizzy-Fragment"] = "card";
+    return fetch(url, { method: "POST", body: body, credentials: "same-origin", headers: headers }).then(function (response) {
+      if (!response.ok) {
+        window.alert("Could not update that card.");
+        return;
+      }
+      const type = response.headers.get("content-type") || "";
+      if (type.indexOf("application/json") >= 0) {
+        return response.json().then(function (payload) {
+          if (payload && payload.html) placeCard(payload);
+        });
+      }
+      window.location.reload();
     });
   }
 
@@ -205,121 +338,142 @@
     else dialog.show();
   }
 
-  function utcDay(date) {
-    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-  }
-
-  function dayDiff(from, to) {
-    return Math.round((utcDay(to) - utcDay(from)) / 86400000);
-  }
-
-  document.querySelectorAll(".bubble").forEach(function (bubble, index) {
-    const closes = bubble.dataset.closesAt;
-    const reminder = Number(bubble.dataset.reminderDays || "0");
-    const stalled = bubble.dataset.stalledAt;
-    let top = "";
-    let center = "";
-    let bottom = "";
-    if (closes) {
-      const days = dayDiff(new Date(), new Date(closes));
-      if (days < reminder) {
-        if (days < 1) {
-          top = "Closes";
-          center = "!";
-          bottom = "Today";
-        } else {
-          top = "Closes in";
-          center = String(days);
-          bottom = days === 1 ? "day" : "days";
-        }
-      }
-    }
-    if (!top && stalled) {
-      const days = Math.max(dayDiff(new Date(stalled), new Date()), 0);
-      top = "Stalled for";
-      center = String(days);
-      bottom = "days";
-    }
-    if (!top) return;
-    bubble.querySelectorAll("[data-bubble]").forEach(function (node) {
-      const slot = node.getAttribute("data-bubble");
-      node.textContent = slot === "top" ? top : slot === "center" ? center : bottom;
+  function movableLinks(root) {
+    return Array.from(root.querySelectorAll("a")).filter(function (link) {
+      return !link.hidden && !link.classList.contains("tray__more") && link.offsetParent !== null;
     });
-    const turns = [-8, 6, -4, 11, -12, 3, 9];
-    bubble.style.setProperty("--bubble-rotate", turns[index % turns.length] + "deg");
-    bubble.hidden = false;
-  });
+  }
 
-  if (board) {
+  function moveLinks(root, direction) {
+    const links = movableLinks(root);
+    if (!links.length) return;
+    const current = links.findIndex(function (link) {
+      return link.getAttribute("aria-selected") === "true";
+    });
+    const nextIndex = current < 0 ? (direction > 0 ? 0 : links.length - 1) : Math.min(links.length - 1, Math.max(0, current + direction));
+    links.forEach(function (link) {
+      link.removeAttribute("aria-selected");
+    });
+    links[nextIndex].setAttribute("aria-selected", "true");
+    links[nextIndex].focus();
+  }
+
+  paintBubbles(document);
+
+  if (boardRoot()) {
     restoreColumns();
-    board.querySelectorAll(".cards__expander").forEach(function (button) {
-      button.addEventListener("click", function () {
-        const column = button.closest("section.cards");
-        if (!column || (column.id === "lane-maybe" && isDesktop())) return;
-        if (column.classList.contains("is-expanded") && column.id !== "lane-maybe") collapseSide(column);
-        else showColumn(column);
-      });
-    });
     desktopQuery.addEventListener("change", restoreColumns);
   }
 
-  document.querySelectorAll(".add-card__toggle").forEach(function (button) {
-    button.addEventListener("click", function () {
-      const fields = button.parentElement.querySelector(".add-card__fields");
-      if (!fields) return;
-      fields.hidden = false;
-      button.hidden = true;
-      const input = fields.querySelector("input");
-      if (input) input.focus();
-    });
-  });
-
-  document.querySelectorAll("article.card").forEach(function (card) {
-    if (card.getAttribute("draggable") === "true") {
-      card.addEventListener("dragstart", function (event) {
-        event.dataTransfer.setData("text/plain", card.dataset.number);
-        event.dataTransfer.effectAllowed = "move";
-        card.classList.add("dragging");
-      });
-      card.addEventListener("dragend", function () {
-        card.classList.remove("dragging");
-      });
+  document.addEventListener("click", function (event) {
+    const expander = event.target.closest(".cards__expander");
+    if (expander) {
+      const column = expander.closest("section.cards");
+      if (!column || (column.id === "lane-maybe" && isDesktop())) return;
+      if (column.classList.contains("is-expanded") && column.id !== "lane-maybe") collapseSide(column);
+      else showColumn(column);
+      return;
     }
-    card.addEventListener("click", function (event) {
-      if (event.target.closest("a, button, input, textarea, select, summary, form")) return;
-      const link = card.querySelector(".card__link");
-      if (link) window.location.href = link.href;
+    const reveal = event.target.closest(".cards__new-toggle");
+    if (reveal) {
+      const form = reveal.parentElement.querySelector("form");
+      if (!form) return;
+      form.hidden = false;
+      reveal.hidden = true;
+      const input = form.querySelector("input[name='column[name]']");
+      if (input) input.focus();
+      return;
+    }
+    const card = event.target.closest("article.card");
+    if (!card || !card.closest(".cards, .cards-grid, .card-grid")) return;
+    if (event.target.closest("a, button, input, textarea, select, summary, form")) return;
+    const link = card.querySelector(".card__link");
+    if (link) window.location.href = link.href;
+  });
+
+  document.addEventListener("dragstart", function (event) {
+    const card = event.target.closest && event.target.closest("article.card");
+    if (!card || card.getAttribute("draggable") !== "true") return;
+    event.dataTransfer.setData("text/plain", card.dataset.number);
+    event.dataTransfer.effectAllowed = "move";
+    card.classList.add("dragging");
+  });
+
+  document.addEventListener("dragend", function () {
+    document.querySelectorAll("article.card.dragging, section.cards.over").forEach(function (node) {
+      node.classList.remove("dragging", "over");
     });
   });
 
-  document.querySelectorAll("section.cards").forEach(function (column) {
-    if (!column.dataset.columnId && !column.dataset.lane) return;
-    column.addEventListener("dragover", function (event) {
-      event.preventDefault();
-      column.classList.add("over");
-    });
-    column.addEventListener("dragleave", function () {
-      column.classList.remove("over");
-    });
-    column.addEventListener("drop", function (event) {
-      event.preventDefault();
-      column.classList.remove("over");
-      const number = event.dataTransfer.getData("text/plain");
-      if (!number || !slug) return;
-      let url = slug + "/cards/" + number + "/triage";
-      const fields = {};
-      if (column.dataset.columnId) fields.column_id = column.dataset.columnId;
-      else if (column.dataset.lane === "maybe") fields._method = "delete";
-      else if (column.dataset.lane === "not_now") url = slug + "/cards/" + number + "/not_now";
-      else if (column.dataset.lane === "closed") url = slug + "/cards/" + number + "/closure";
-      else return;
-      post(url, fields);
-    });
+  document.addEventListener("dragover", function (event) {
+    const column = event.target.closest && event.target.closest("section.cards");
+    if (!column || (!column.dataset.columnId && !column.dataset.lane)) return;
+    event.preventDefault();
+    column.classList.add("over");
+  });
+
+  document.addEventListener("drop", function (event) {
+    const column = event.target.closest && event.target.closest("section.cards");
+    if (!column || (!column.dataset.columnId && !column.dataset.lane)) return;
+    event.preventDefault();
+    column.classList.remove("over");
+    const number = event.dataTransfer.getData("text/plain");
+    if (!number || !slug) return;
+    let url = slug + "/cards/" + number + "/triage";
+    const fields = {};
+    if (column.dataset.columnId) fields.column_id = column.dataset.columnId;
+    else if (column.dataset.lane === "maybe") fields._method = "delete";
+    else if (column.dataset.lane === "not_now") url = slug + "/cards/" + number + "/not_now";
+    else if (column.dataset.lane === "closed") url = slug + "/cards/" + number + "/closure";
+    else return;
+    post(url, fields);
   });
 
   const bar = document.querySelector(".bar");
   const barInput = document.querySelector(".bar__input");
+  const barResults = document.querySelector(".bar__results");
   if (bar && barInput && barInput.value) bar.classList.add("is-open");
+
+  let searchGeneration = 0;
+  function renderSearch(cards) {
+    if (!barResults) return;
+    if (!cards.length) {
+      barResults.innerHTML = '<p class="tray__empty">No matches.</p>';
+      barResults.hidden = false;
+      return;
+    }
+    barResults.innerHTML = cards.map(function (card) {
+      const boardName = card.board && card.board.name ? card.board.name : "";
+      return '<a class="search__result" href="' + escapeHtml(card.url) + '"><strong>#' + escapeHtml(card.number) + " " + escapeHtml(card.title || "Untitled") + "</strong><span>" + escapeHtml((card.description || "").slice(0, 180)) + "</span><em>" + escapeHtml(boardName) + "</em></a>";
+    }).join("");
+    barResults.hidden = false;
+  }
+
+  if (barInput) {
+    barInput.addEventListener("input", function () {
+      const query = barInput.value.trim();
+      const generation = ++searchGeneration;
+      if (!query || !slug) {
+        if (barResults) {
+          barResults.hidden = true;
+          barResults.innerHTML = "";
+        }
+        return;
+      }
+      window.setTimeout(function () {
+        if (generation !== searchGeneration) return;
+        fetch(slug + "/search?q=" + encodeURIComponent(query), {
+          headers: { Accept: "application/json" },
+          credentials: "same-origin",
+        }).then(function (response) {
+          return response.json();
+        }).then(function (payload) {
+          if (generation !== searchGeneration) return;
+          renderSearch((payload && payload.cards) || []);
+        });
+      }, 180);
+    });
+  }
 
   const jumpFilter = document.querySelector("[data-jump-filter]");
   if (jumpFilter) {
@@ -330,6 +484,136 @@
       });
     });
   }
+
+  const filterForm = document.querySelector(".board-filters");
+  let filterGeneration = 0;
+  function refreshBoard() {
+    if (!filterForm) return;
+    const generation = ++filterGeneration;
+    const params = new URLSearchParams(new FormData(filterForm));
+    fetch(filterForm.action + "?" + params.toString(), {
+      headers: { "X-Fizzy-Fragment": "board", Accept: "text/html" },
+      credentials: "same-origin",
+    }).then(function (response) {
+      return response.text();
+    }).then(function (html) {
+      if (generation !== filterGeneration) return;
+      const stage = document.getElementById("board-stage");
+      if (!stage) return;
+      stage.innerHTML = html;
+      if (boardRoot()) restoreColumns();
+      paintBubbles(stage);
+    });
+  }
+  if (filterForm) {
+    filterForm.addEventListener("input", function (event) {
+      if (event.target && event.target.name === "q") refreshBoard();
+    });
+    filterForm.addEventListener("change", function (event) {
+      if (event.target && event.target.type === "checkbox") refreshBoard();
+    });
+  }
+
+  function descriptionChanged(desc) {
+    const plain = desc.innerText.replace(/\s+/g, " ").trim();
+    const html = desc.innerHTML.trim();
+    return plain !== (desc.dataset.originalPlain || "") || html !== (desc.dataset.originalHtml || "");
+  }
+
+  function saveCardFields(editForm) {
+    const titleInput = editForm.querySelector("[name='card[title]']");
+    const desc = editForm.querySelector(".card__description");
+    const body = new FormData();
+    body.append("csrf_token", csrf);
+    body.append("_method", "put");
+    let dirty = false;
+    if (titleInput && titleInput.value !== titleInput.defaultValue) {
+      body.append("card[title]", titleInput.value);
+      dirty = true;
+    }
+    if (desc && descriptionChanged(desc)) {
+      body.append("card[description]", desc.innerHTML);
+      dirty = true;
+    }
+    if (!dirty) return Promise.resolve(true);
+    return fetch(editForm.action, { method: "POST", body: body, credentials: "same-origin" }).then(function (response) {
+      if (!response.ok) return false;
+      if (titleInput) titleInput.defaultValue = titleInput.value;
+      if (desc) {
+        desc.dataset.originalHtml = desc.innerHTML.trim();
+        desc.dataset.originalPlain = desc.innerText.replace(/\s+/g, " ").trim();
+      }
+      return true;
+    });
+  }
+
+  const editForm = document.querySelector("form.card__edit");
+  if (editForm) {
+    const titleInput = editForm.querySelector("[name='card[title]']");
+    const desc = editForm.querySelector(".card__description");
+    if (desc) {
+      desc.dataset.originalHtml = desc.innerHTML.trim();
+      desc.dataset.originalPlain = desc.innerText.replace(/\s+/g, " ").trim();
+      desc.addEventListener("focusout", function () {
+        saveCardFields(editForm);
+      });
+    }
+    if (titleInput) {
+      titleInput.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          titleInput.blur();
+        }
+      });
+      titleInput.addEventListener("blur", function () {
+        saveCardFields(editForm);
+      });
+    }
+    editForm.addEventListener("submit", function () {
+      const hidden = editForm.querySelector("[name='card[description]']");
+      if (!hidden || !desc) return;
+      if (descriptionChanged(desc)) {
+        hidden.disabled = false;
+        hidden.value = desc.innerHTML;
+      } else {
+        hidden.disabled = true;
+      }
+    });
+    document.querySelectorAll("form").forEach(function (form) {
+      if (form === editForm) return;
+      form.addEventListener("submit", function (event) {
+        if (event.defaultPrevented) return;
+        const pendingTitle = titleInput && titleInput.value !== titleInput.defaultValue;
+        const pendingDesc = desc && descriptionChanged(desc);
+        if (!pendingTitle && !pendingDesc) return;
+        event.preventDefault();
+        saveCardFields(editForm).then(function (ok) {
+          if (!ok) {
+            window.alert("Could not save the card before that change.");
+            return;
+          }
+          form.submit();
+        });
+      });
+    });
+  }
+
+  document.addEventListener("focusout", function (event) {
+    const input = event.target.closest && event.target.closest(".step__content");
+    if (!input || input.value === input.defaultValue || !input.dataset.url) return;
+    const body = new FormData();
+    body.append("csrf_token", csrf);
+    body.append("_method", "put");
+    body.append("step[content]", input.value);
+    fetch(input.dataset.url, {
+      method: "POST",
+      body: body,
+      headers: { Accept: "application/json" },
+      credentials: "same-origin",
+    }).then(function (response) {
+      if (response.ok) input.defaultValue = input.value;
+    });
+  });
 
   document.addEventListener("keydown", function (event) {
     const key = event.key;
@@ -344,9 +628,13 @@
         event.preventDefault();
         return;
       }
-      if (bar && bar.classList.contains("is-open") && event.target === barInput) {
+      if (bar && bar.classList.contains("is-open")) {
         bar.classList.remove("is-open");
-        barInput.blur();
+        if (barResults) {
+          barResults.hidden = true;
+          barResults.innerHTML = "";
+        }
+        if (barInput) barInput.blur();
         event.preventDefault();
         return;
       }
@@ -384,6 +672,37 @@
         event.preventDefault();
         link.click();
       }
+      return;
+    }
+
+    if (bar && bar.classList.contains("is-open") && (event.target === barInput || (event.target.closest && event.target.closest(".bar__results")))) {
+      if (plain && (key === "ArrowDown" || key === "ArrowUp") && barResults) {
+        event.preventDefault();
+        moveLinks(barResults, key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if (key === "Enter") {
+        const chosen = barResults && barResults.querySelector(".search__result[aria-selected='true']");
+        if (chosen) {
+          event.preventDefault();
+          window.location.href = chosen.href;
+          return;
+        }
+      }
+    }
+
+    const openDialog = document.querySelector("dialog[open]");
+    if (openDialog && plain && (key === "ArrowDown" || key === "ArrowUp" || key === "Enter")) {
+      if (key === "Enter") {
+        const chosen = openDialog.querySelector("[aria-selected='true']");
+        if (chosen) {
+          event.preventDefault();
+          chosen.click();
+        }
+        return;
+      }
+      event.preventDefault();
+      moveLinks(openDialog, key === "ArrowDown" ? 1 : -1);
       return;
     }
 
@@ -426,12 +745,17 @@
       return;
     }
     if (plain && (key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown")) {
-      if (board && columns().length) {
+      if (columns().length) {
         event.preventDefault();
         if (key === "ArrowRight") moveColumn(1);
         else if (key === "ArrowLeft") moveColumn(-1);
         else if (key === "ArrowDown") moveCard(1);
         else moveCard(-1);
+        return;
+      }
+      if (document.querySelector(".cards-grid, .card-grid") && (key === "ArrowDown" || key === "ArrowUp")) {
+        event.preventDefault();
+        moveGrid(key === "ArrowDown" ? 1 : -1);
         return;
       }
       if (key === "ArrowLeft") {
@@ -443,7 +767,7 @@
       }
       return;
     }
-    if (plain && key === "Enter" && board) {
+    if (plain && key === "Enter" && (boardRoot() || document.querySelector(".cards-grid, .card-grid"))) {
       const card = selectedCard();
       const link = card && card.querySelector(".card__link");
       if (link) {
@@ -473,7 +797,7 @@
       return;
     }
     if (plain && (key === "m" || key === "M")) {
-      const card = board ? selectedCard() : null;
+      const card = (boardRoot() || document.querySelector(".cards-grid")) ? selectedCard() : null;
       if (card && card.dataset.assignUrl) {
         event.preventDefault();
         post(card.dataset.assignUrl);
@@ -525,27 +849,5 @@
     });
   });
 
-  const editForm = document.querySelector("form.card__edit");
-  if (editForm) {
-    const titleInput = editForm.querySelector("[name='card[title]']");
-    const descriptionInput = editForm.querySelector("[name='card[description]']");
-    document.querySelectorAll("form").forEach(function (form) {
-      if (form === editForm) return;
-      form.addEventListener("submit", function (event) {
-        if (event.defaultPrevented || !titleInput || !descriptionInput) return;
-        if (titleInput.value === titleInput.defaultValue && descriptionInput.value === descriptionInput.defaultValue) return;
-        event.preventDefault();
-        fetch(editForm.action, { method: "POST", body: new FormData(editForm), credentials: "same-origin" }).then(function (response) {
-          if (!response.ok) {
-            window.alert("Could not save the card before that change.");
-            return;
-          }
-          titleInput.defaultValue = titleInput.value;
-          descriptionInput.defaultValue = descriptionInput.value;
-          form.submit();
-        });
-      });
-    });
-  }
   document.documentElement.dataset.fizzyReady = "1";
 })();

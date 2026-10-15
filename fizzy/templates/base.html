@@ -92,8 +92,9 @@
       <button type="button" class="tray__toggle" data-hotkey="p" aria-controls="pins-tray">Pinned <kbd>P</kbd></button>
     </section>
     <form class="bar" action="{{ slug }}/search" method="get">
+      <div class="bar__results" hidden></div>
       <button type="button" class="bar__label" data-hotkey="k">Search <kbd>K</kbd></button>
-      <input class="bar__input" name="q" aria-label="Search cards" placeholder="Search cards" value="{{ request.args.get('q', '') }}">
+      <input class="bar__input" name="q" aria-label="Search cards" placeholder="Search cards" autocomplete="off" value="{{ request.args.get('q', '') }}">
     </form>
     <section class="tray tray--notes">
       <dialog class="tray__dialog" id="notes-tray">

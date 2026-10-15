@@ -526,11 +526,8 @@ def home(slug):
     urls = urls_for(g.account)
     if wants_json():
         return json_body([event_json(conn(), event, urls) for event in rows], extra_headers=headers)
-    described = []
-    for event in rows:
-        payload = event_json(conn(), event, urls)
-        described.append(payload)
-    return render_template("activity.html", events=described)
+    timeline = store.events_for(conn(), g.user, multi("board_ids"), multi("creator_ids"), 180, 0)
+    return render_template("activity.html", days=_activity_days(timeline))
 
 
 @bp.route("/<int:slug>/activities")
@@ -653,16 +650,23 @@ def board_detail(slug, board_id):
         or multi("tag_ids")
     )
     filtered = [card_view(conn(), card, g.user["id"]) for card in store.query_cards(conn(), g.user, filters, 60, 0)] if filtering else []
-    return render_template(
-        "board.html",
+    stage = dict(
         board=board,
         columns=column_views,
         lanes=lanes,
-        published=published,
-        days=store.postpone_days(conn(), board["account_id"], board["id"]),
         filtering=filtering,
         filtered=filtered,
+    )
+    if request.headers.get("X-Fizzy-Fragment") == "board":
+        return render_template("_board_stage.html", **stage)
+    return render_template(
+        "board.html",
+        published=published,
+        days=store.postpone_days(conn(), board["account_id"], board["id"]),
         filters=filters,
+        members=store.users_in_account(conn(), g.account["id"]),
+        tags=store.tags_in_account(conn(), g.account["id"]),
+        **stage,
     )
 
 
@@ -905,10 +909,12 @@ def card_detail(slug, number):
         if "description" in payload:
             from .text import plain_text
             existing = store.rich_text(conn(), "Card", card["id"], "description")
-            current = plain_text(existing["body"] if existing else "")
-            submitted = (payload.get("description") or "").strip()
-            if submitted != current:
-                description = payload.get("description")
+            existing_body = (existing["body"] if existing else "") or ""
+            submitted = payload.get("description") or ""
+            same_html = submitted.strip() == existing_body.strip()
+            same_plain = plain_text(submitted).strip() == plain_text(existing_body).strip()
+            if not same_html and not (same_plain and "<" not in submitted):
+                description = submitted
         updated = store.update_card(
             conn(), g.user, card,
             title=payload.get("title") if "title" in payload else None,
@@ -956,6 +962,74 @@ def card_detail(slug, number):
     )
 
 
+def _activity_days(events):
+    added = {"card_published", "card_reopened"}
+    closed = {"card_closed"}
+    updated = {
+        "card_assigned",
+        "card_unassigned",
+        "card_collection_changed",
+        "card_board_changed",
+        "card_postponed",
+        "card_auto_postponed",
+        "card_triaged",
+        "card_sent_back_to_triage",
+        "comment_created",
+    }
+    days = []
+    index = {}
+    for event in events:
+        action = event["action"]
+        if action in added:
+            bucket = "added"
+        elif action in closed:
+            bucket = "closed"
+        elif action in updated:
+            bucket = "updated"
+        else:
+            continue
+        when = parse_dt(event.get("created_at"))
+        key = when.date().isoformat() if when else (event.get("created_at") or "")[:10]
+        if key not in index:
+            label = f"{when.strftime('%A, %b')} {when.day}" if when else key
+            index[key] = {"day": key, "label": label, "added": [], "updated": [], "closed": []}
+            days.append(index[key])
+        card = None
+        if event["eventable_type"] == "Card":
+            card = store.card_by_id(conn(), event["eventable_id"])
+        elif event["eventable_type"] == "Comment":
+            comment = store.comment_by_id(conn(), event["eventable_id"])
+            card = store.card_by_id(conn(), comment["card_id"]) if comment else None
+        creator = store.user_by_id(conn(), event["creator_id"])
+        board = store.board_by_id(conn(), event["board_id"])
+        column = store.column_by_id(conn(), card["column_id"]) if card and card.get("column_id") else None
+        color = "var(--color-card-complete)" if card and store.closure_of(conn(), card["id"]) else (column["color"] if column else "var(--color-card-2)")
+        index[key][bucket].append({
+            "description": store.describe_event(conn(), event, card),
+            "url": f"{g.slug}/cards/{card['number']}" if card else f"{g.slug}/",
+            "number": card["number"] if card else "",
+            "board": board["name"] if board else "",
+            "who": creator["name"] if creator else "Someone",
+            "color": color,
+            "time": when.strftime("%H:%M") if when else "",
+        })
+    return days
+
+
+def _card_fragment(card, stay: bool):
+    view = card_view(conn(), card, g.user["id"])
+    if view["closed"]:
+        lane = "closed"
+    elif view["postponed"]:
+        lane = "not_now"
+    elif view["column"]:
+        lane = view["column"]["id"]
+    else:
+        lane = "maybe"
+    html = render_template("_card.html", view=view)
+    return json_body({"html": html, "lane": lane, "number": card["number"], "stay": stay})
+
+
 def _card_action(slug, number, work):
     bounced = enter_account(slug)
     if bounced:
@@ -967,6 +1041,11 @@ def _card_action(slug, number, work):
         if result is not None and not isinstance(result, tuple):
             return result
         return json_body({}, 204)
+    if request.headers.get("X-Fizzy-Fragment") == "card":
+        fresh = store.card_by_id(conn(), card["id"])
+        path = request.path.rstrip("/")
+        stay = path.endswith("/self_assignment") or path.endswith("/goldness") or path.endswith("/pin") or path.endswith("/watch") or path.endswith("/taggings") or path.endswith("/assignments")
+        return _card_fragment(fresh, stay)
     return redirect(request.referrer or f"{g.slug}/cards/{number}")
 
 
