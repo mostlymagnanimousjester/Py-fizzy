@@ -524,4 +524,28 @@
       if (!window.confirm("Continue and " + label.trim().toLowerCase() + "?")) event.preventDefault();
     });
   });
+
+  const editForm = document.querySelector("form.card__edit");
+  if (editForm) {
+    const titleInput = editForm.querySelector("[name='card[title]']");
+    const descriptionInput = editForm.querySelector("[name='card[description]']");
+    document.querySelectorAll("form").forEach(function (form) {
+      if (form === editForm) return;
+      form.addEventListener("submit", function (event) {
+        if (event.defaultPrevented || !titleInput || !descriptionInput) return;
+        if (titleInput.value === titleInput.defaultValue && descriptionInput.value === descriptionInput.defaultValue) return;
+        event.preventDefault();
+        fetch(editForm.action, { method: "POST", body: new FormData(editForm), credentials: "same-origin" }).then(function (response) {
+          if (!response.ok) {
+            window.alert("Could not save the card before that change.");
+            return;
+          }
+          titleInput.defaultValue = titleInput.value;
+          descriptionInput.defaultValue = descriptionInput.value;
+          form.submit();
+        });
+      });
+    });
+  }
+  document.documentElement.dataset.fizzyReady = "1";
 })();
