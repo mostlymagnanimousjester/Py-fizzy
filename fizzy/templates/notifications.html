@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Inbox · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet">
+  <div class="board-head">
+    <div>
+      <p class="kicker">Inbox</p>
+      <h1>What needs you</h1>
+    </div>
+    <form method="post" action="{{ slug }}/notifications/bulk_reading">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Mark all read</button>
+    </form>
+  </div>
+  <form class="filters" method="post" action="{{ slug }}/notifications/settings">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Bundle preference
+      <select name="user_settings[bundle_email_frequency]">
+        {% for value in ["never", "every_few_hours", "daily", "weekly"] %}
+        <option value="{{ value }}">{{ value|replace("_", " ") }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Save</button>
+    <span class="quiet">Stored for a swapped database. This app does not send mail.</span>
+  </form>
+  {% if notes %}
+  <ol class="feed">
+    {% for note in notes %}
+    <li class="{% if not note.read %}unread{% endif %}">
+      <a href="{{ slug }}/cards/{{ note.card.number }}">
+        <strong>{{ note.body }}</strong>
+        <span>{{ note.created_at }}{% if note.unread_count %} · {{ note.unread_count }} new{% endif %}</span>
+      </a>
+      <form method="post" action="{{ slug }}/notifications/{{ note.id }}/reading">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        {% if not note.read %}<button type="submit">Mark read</button>{% else %}
+        <input type="hidden" name="_method" value="delete">
+        <button class="ghost" type="submit">Mark unread</button>
+        {% endif %}
+      </form>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="empty">Your inbox is clear. Mentions and watched cards show up here.</p>
+  {% endif %}
+</section>
+{% endblock %}

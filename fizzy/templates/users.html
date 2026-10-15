@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}People · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet">
+  <p class="kicker">{{ account.name }}</p>
+  <h1>People</h1>
+  {% if join_code and current_user.role in ["owner", "admin"] %}
+  <p>Join code <code>{{ join_code.code }}</code> · used {{ join_code.usage_count }} of {{ join_code.usage_limit }}. Share <a href="{{ slug }}/join/{{ join_code.code }}">{{ slug }}/join/{{ join_code.code }}</a>.</p>
+  {% endif %}
+  <ul class="people-list">
+    {% for person in users %}
+    <li>
+      <img alt="" src="{{ slug }}/users/{{ person.id }}/avatar" width="40" height="40">
+      <div>
+        <strong>{{ person.name }}</strong>
+        <span class="quiet">{{ person.role }}{% if person.email_address %} · {{ person.email_address }}{% endif %}{% if not person.active %} · deactivated{% endif %}</span>
+      </div>
+      {% if current_user.role in ["owner", "admin"] or person.id == current_user.id %}
+      <a href="{{ slug }}/users/{{ person.id }}">Edit</a>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

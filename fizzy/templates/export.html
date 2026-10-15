@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Export · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet narrow">
+  <p class="kicker">{{ export.status }}</p>
+  <h1>Your export is ready</h1>
+  <p>A zip of card JSON, built on this machine. It is a readable archive, not Fizzy’s data-transfer package.</p>
+  {% if export.download_url %}
+  <p><a class="button" href="{{ export.download_url }}">Download zip</a></p>
+  {% else %}
+  <p class="empty">The file is not available. Check that storage is writable.</p>
+  {% endif %}
+</section>
+{% endblock %}

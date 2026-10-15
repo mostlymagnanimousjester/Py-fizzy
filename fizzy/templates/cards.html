@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Cards · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet">
+  <div class="board-head">
+    <div>
+      <p class="kicker">{{ account.name }}</p>
+      <h1>Cards</h1>
+    </div>
+  </div>
+  <form class="filters" method="get" action="{{ slug }}/cards">
+    <label>Lane
+      <select name="indexed_by">
+        {% for value, label in [("all", "Open"), ("maybe", "Maybe"), ("not_now", "Not now"), ("closed", "Done"), ("golden", "Golden"), ("draft", "My drafts"), ("stalled", "Stalled")] %}
+        <option value="{{ value }}" {% if filters.indexed_by == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Board
+      <select name="board_ids[]">
+        <option value="">Every board</option>
+        {% for board in nav_boards %}
+        <option value="{{ board.id }}" {% if board.id in filters.board_ids %}selected{% endif %}>{{ board.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Sort
+      <select name="sorted_by">
+        {% for value, label in [("latest", "Recently active"), ("newest", "Newest"), ("oldest", "Oldest")] %}
+        <option value="{{ value }}" {% if filters.sorted_by == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Words
+      <input name="q" value="{{ filters.terms[0] if filters.terms else '' }}" placeholder="title or description">
+    </label>
+    <button type="submit">Apply</button>
+  </form>
+  {% if cards %}
+  <div class="card-grid">
+    {% for view in cards %}{% include "_card.html" %}{% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">Nothing in this view. Open cards live on a board until you close them or send them to Not now.</p>
+  {% endif %}
+</section>
+{% endblock %}

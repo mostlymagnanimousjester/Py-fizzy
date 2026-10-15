@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Activity · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet">
+  <p class="kicker">{{ account.name }}</p>
+  <h1>What changed</h1>
+  {% if events %}
+  <ol class="feed">
+    {% for event in events %}
+    <li>
+      <a href="{{ event.url or slug + '/' }}">
+        <strong>{{ event.description }}</strong>
+        <span>{{ event.created_at }}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="empty">Nothing has happened yet. <a href="{{ slug }}/boards/new">Create a board</a> and publish a card.</p>
+  {% endif %}
+</section>
+{% endblock %}

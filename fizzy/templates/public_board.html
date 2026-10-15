@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ board.name }} · Fizzy{% endblock %}
+{% block body_class %}board-page{% endblock %}
+{% block body %}
+<div class="board-head">
+  <div>
+    <p class="kicker">Published board</p>
+    <h1>{{ board.name }}</h1>
+    {% if description %}<div class="prose">{{ description|safe }}</div>{% endif %}
+  </div>
+</div>
+<div class="columns">
+  <section class="column lane-maybe">
+    <header><h2>Maybe?</h2><span>{{ lanes.maybe|length }}</span></header>
+    <div class="stack">
+      {% for view in lanes.maybe %}{% include "_card.html" %}{% else %}<p class="empty">Nothing waiting.</p>{% endfor %}
+    </div>
+  </section>
+  {% for entry in columns %}
+  <section class="column" style="--card-color: {{ entry.column.color }}">
+    <header><h2><i class="swatch"></i>{{ entry.column.name }}</h2><span>{{ entry.cards|length }}</span></header>
+    <div class="stack">
+      {% for view in entry.cards %}{% include "_card.html" %}{% else %}<p class="empty">Empty column.</p>{% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+  <section class="column lane-later">
+    <header><h2>Not now</h2><span>{{ lanes.not_now|length }}</span></header>
+    <div class="stack">{% for view in lanes.not_now %}{% include "_card.html" %}{% else %}<p class="empty">No postponed cards.</p>{% endfor %}</div>
+  </section>
+  <section class="column lane-done">
+    <header><h2>Done</h2><span>{{ lanes.closed|length }}</span></header>
+    <div class="stack">{% for view in lanes.closed %}{% include "_card.html" %}{% else %}<p class="empty">Nothing closed.</p>{% endfor %}</div>
+  </section>
+</div>
+{% endblock %}

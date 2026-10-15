@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}API tokens · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet narrow">
+  <p class="kicker">Identity</p>
+  <h1>Personal access tokens</h1>
+  <p>Scripts send <code>Authorization: Bearer</code> and get JSON. A read token cannot change the board.</p>
+  <form method="post" action="/my/access_tokens" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Description <input name="access_token[description]" required placeholder="Laptop script"></label>
+    <label>Permission
+      <select name="access_token[permission]">
+        <option value="read">Read</option>
+        <option value="write">Write</option>
+      </select>
+    </label>
+    <button type="submit">Create token</button>
+  </form>
+  {% if tokens %}
+  <ul class="plain">
+    {% for token in tokens %}
+    <li>
+      <strong>{{ token.description or "Token" }}</strong>
+      <span class="quiet">{{ token.permission }} · {{ token.created_at }}</span>
+      <form method="post" action="/my/access_tokens/{{ token.id }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="_method" value="delete">
+        <button class="text" type="submit">Revoke</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">No tokens yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

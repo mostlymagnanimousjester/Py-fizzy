@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Settings · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet narrow">
+  <p class="kicker">{{ account.name }}</p>
+  <h1>Account settings</h1>
+  {% if current_user.role in ["owner", "admin"] %}
+  <form method="post" action="{{ slug }}/account/rename" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Account name <input name="name" value="{{ account.name }}" required maxlength="255"></label>
+    <button type="submit">Rename</button>
+  </form>
+  <form method="post" action="{{ slug }}/account/entropy" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Postpone quiet cards after
+      <select name="entropy[auto_postpone_period_in_days]">
+        {% for choice in postpone_choices %}
+        <option value="{{ choice }}" {% if choice == days %}selected{% endif %}>{{ choice }} days</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Update postpone</button>
+  </form>
+  {% if join_code %}
+  <p>Join code <code>{{ join_code.code }}</code> · {{ join_code.usage_count }} of {{ join_code.usage_limit }} uses.</p>
+  <form method="post" action="{{ slug }}/account/join_code" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Usage limit <input type="number" name="account_join_code[usage_limit]" min="1" value="{{ join_code.usage_limit }}"></label>
+    <button type="submit">Update limit</button>
+  </form>
+  <form method="post" action="{{ slug }}/account/join_code">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="_method" value="delete">
+    <button class="ghost" type="submit">Reset join code</button>
+  </form>
+  {% endif %}
+  <form method="post" action="{{ slug }}/account/exports">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Download an account export</button>
+  </form>
+  {% endif %}
+  <form method="post" action="{{ slug }}/my/timezone" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Timezone <input name="timezone_name" placeholder="America/Chicago" required></label>
+    <button type="submit">Save timezone</button>
+  </form>
+  <p class="quiet">Notification bundle is currently {{ settings.bundle_email_frequency|replace("_", " ") }}. Change it from the inbox. Mail is not sent.</p>
+  <form method="post" action="{{ slug }}/account/new" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Another account <input name="name" placeholder="Side project" required></label>
+    <button type="submit">Create account</button>
+  </form>
+</section>
+{% endblock %}

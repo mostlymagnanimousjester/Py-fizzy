@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Boards · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet">
+  <div class="board-head">
+    <div>
+      <p class="kicker">{{ account.name }}</p>
+      <h1>Boards</h1>
+    </div>
+    <a class="button" href="{{ slug }}/boards/new">New board</a>
+  </div>
+  {% if boards %}
+  <ul class="board-list">
+    {% for board in boards %}
+    <li><a href="{{ slug }}/boards/{{ board.id }}"><strong>{{ board.name }}</strong><span>{{ "Everyone" if board.all_access else "Private" }}</span></a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">No boards yet. A board is a workflow: Maybe, the columns you name, Not now, and Done.</p>
+  {% endif %}
+</section>
+{% endblock %}

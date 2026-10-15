@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Join · Fizzy{% endblock %}
+{% block body %}
+<section class="gate">
+  <p class="kicker">Invitation</p>
+  <h1>Join with {{ code }}</h1>
+  <p>You will be added as a member of the account that owns this code. All-access boards become visible immediately.</p>
+  <form method="post" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Join this account</button>
+  </form>
+</section>
+{% endblock %}

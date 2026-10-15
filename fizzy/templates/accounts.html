@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Accounts · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet">
+  <p class="kicker">This identity</p>
+  <h1>Choose an account</h1>
+  {% if accounts %}
+  <ul class="board-list">
+    {% for account in accounts %}
+    <li><a href="/{{ account.external_account_id }}/"><strong>{{ account.name }}</strong><span>/{{ account.external_account_id }}</span></a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">This identity is not a member of any account in this database.</p>
+  {% endif %}
+</section>
+{% endblock %}

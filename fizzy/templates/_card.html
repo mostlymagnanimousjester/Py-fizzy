@@ -1,0 +1,28 @@
+<article class="bubble{% if view.golden %} is-gold{% endif %}{% if view.closed %} is-closed{% endif %}"
+  style="--card-color: {{ view.color }}"
+  draggable="{% if current_user %}true{% else %}false{% endif %}"
+  data-number="{{ view.card.number }}">
+  <a href="{% if public_key %}{{ slug }}/public/boards/{{ public_key }}/cards/{{ view.card.number }}{% else %}{{ slug }}/cards/{{ view.card.number }}{% endif %}">
+    <header>
+      {% if view.golden %}<span class="pill gold">Gold</span>{% endif %}
+      <span class="num">#{{ view.card.number }}</span>
+    </header>
+    <h3>{{ view.card.title or "Untitled" }}</h3>
+    {% if view.description_text %}
+      <p>{{ view.description_text[:180] }}{% if view.description_text|length > 180 %}…{% endif %}</p>
+    {% endif %}
+    {% if view.image %}
+      <img class="thumb" alt="" src="{{ slug }}/storage/{{ view.image.id }}">
+    {% endif %}
+    <footer>
+      {% if view.tags %}
+        <span class="tags">{% for tag in view.tags %}<em>#{{ tag.title }}</em>{% endfor %}</span>
+      {% endif %}
+      {% if view.step_total %}<span class="meta">{{ view.step_done }}/{{ view.step_total }}</span>{% endif %}
+      {% if view.comment_count %}<span class="meta">{{ view.comment_count }} comments</span>{% endif %}
+      {% if view.assignees %}
+        <span class="faces">{% for person in view.assignees[:3] %}<i title="{{ person.name }}">{{ person.name[:1] }}</i>{% endfor %}</span>
+      {% endif %}
+    </footer>
+  </a>
+</article>

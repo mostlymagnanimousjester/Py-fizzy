@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Pins · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet">
+  <p class="kicker">{{ current_user.name }}</p>
+  <h1>Pinned cards</h1>
+  {% if cards %}
+  <div class="card-grid">
+    {% for view in cards %}{% include "_card.html" %}{% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">Pin a card from its page when you want it close at hand.</p>
+  {% endif %}
+</section>
+{% endblock %}

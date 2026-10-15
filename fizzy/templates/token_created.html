@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}New token · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet narrow">
+  <p class="kicker">Copy it now</p>
+  <h1>{{ token.description or "Personal token" }}</h1>
+  <p>The token stays in the database, but this is the only screen that shows the full value.</p>
+  <pre class="secret">{{ token.token }}</pre>
+  <p class="quiet">Permission: {{ token.permission }}</p>
+  <p><a class="button" href="/my/access_tokens">Back to tokens</a></p>
+</section>
+{% endblock %}

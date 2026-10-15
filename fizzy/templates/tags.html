@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Tags · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet">
+  <p class="kicker">{{ account.name }}</p>
+  <h1>Tags</h1>
+  {% if tags %}
+  <p class="tags big">{% for tag in tags %}<a href="{{ slug }}/cards?tag_ids[]={{ tag.id }}">#{{ tag.title }}</a>{% endfor %}</p>
+  {% else %}
+  <p class="empty">Tags appear when you add one on a card.</p>
+  {% endif %}
+</section>
+{% endblock %}

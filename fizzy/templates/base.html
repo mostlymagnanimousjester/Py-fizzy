@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Fizzy{% endblock %}</title>
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body class="{% block body_class %}{% endblock %}" data-slug="{{ slug }}">
+  <header class="top">
+    <a class="mark" href="{% if slug %}{{ slug }}/{% else %}/{% endif %}">Fizzy</a>
+    {% if current_user %}
+    <form class="search" action="{{ slug }}/search" method="get">
+      <input type="search" name="q" placeholder="Search cards" value="{{ request.args.get('q', '') }}" aria-label="Search cards">
+    </form>
+    <nav class="top-nav">
+      <a href="{{ slug }}/">Activity</a>
+      <a href="{{ slug }}/boards">Boards</a>
+      <a href="{{ slug }}/cards">Cards</a>
+      <a href="{{ slug }}/my/pins">Pins</a>
+      <a href="{{ slug }}/notifications">Inbox{% if unread %} <span class="count">{{ unread }}</span>{% endif %}</a>
+      <a href="{{ slug }}/account/settings">Settings</a>
+    </nav>
+    <details class="me">
+      <summary>{{ current_user.name }}</summary>
+      <div class="menu">
+        <a href="{{ slug }}/users">People</a>
+        <a href="/my/access_tokens">API tokens</a>
+        <a href="/accounts">Switch account</a>
+        <form method="post" action="/logout">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="_method" value="delete">
+          <button type="submit">Log out</button>
+        </form>
+      </div>
+    </details>
+    {% elif identity %}
+    <nav class="top-nav">
+      <a href="/accounts">Accounts</a>
+      <a href="/my/access_tokens">API tokens</a>
+    </nav>
+    <form method="post" action="/logout">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="_method" value="delete">
+      <button type="submit">Log out</button>
+    </form>
+    {% endif %}
+  </header>
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <div class="flash">{{ messages[0] }}</div>
+    {% endif %}
+  {% endwith %}
+  <main>
+    {% block body %}{% endblock %}
+  </main>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

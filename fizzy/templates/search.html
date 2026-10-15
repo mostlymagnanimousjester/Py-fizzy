@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Search · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet">
+  <p class="kicker">Search</p>
+  <h1>{% if terms %}“{{ terms }}”{% else %}Search cards{% endif %}</h1>
+  {% if cards %}
+  <div class="card-grid">
+    {% for view in cards %}{% include "_card.html" %}{% endfor %}
+  </div>
+  {% elif terms %}
+  <p class="empty">No cards match that text or number.</p>
+  {% else %}
+  <p class="empty">Type in the search box to look through titles, descriptions, and card numbers.</p>
+  {% endif %}
+</section>
+{% endblock %}

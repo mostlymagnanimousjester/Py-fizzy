@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ status }} · Fizzy{% endblock %}
+{% block body %}
+<section class="gate">
+  <p class="kicker">{{ status }}</p>
+  <h1>{{ message }}</h1>
+  <p class="quiet">{% if current_user %}<a href="{{ slug }}/">Back to activity</a>{% else %}<a href="/login">Log in</a>{% endif %}</p>
+</section>
+{% endblock %}

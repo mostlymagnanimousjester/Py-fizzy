@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ person.name }} · Fizzy{% endblock %}
+{% block body %}
+<section class="sheet narrow">
+  <p class="kicker"><a href="{{ slug }}/users">People</a></p>
+  <h1>{{ person.name }}</h1>
+  <img class="avatar" alt="" src="{{ slug }}/users/{{ person.id }}/avatar" width="80" height="80">
+  <form method="post" action="{{ slug }}/users/{{ person.id }}" class="stack-form" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="_method" value="put">
+    <label>Name <input name="user[name]" value="{{ person.name }}" required maxlength="255"></label>
+    {% if current_user.role in ["owner", "admin"] and person.id != current_user.id %}
+    <label>Role
+      <select name="user[role]">
+        {% for role in ["owner", "admin", "member"] %}
+        <option value="{{ role }}" {% if person.role == role %}selected{% endif %}>{{ role }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <label>Avatar <input type="file" name="user[avatar]" accept="image/jpeg,image/png,image/gif,image/webp"></label>
+    <button type="submit">Save profile</button>
+  </form>
+  {% if person.id == current_user.id %}
+  <form method="post" action="{{ slug }}/users/{{ person.id }}/email_addresses" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>New email <input type="email" name="email_address" value="{{ person.email_address or '' }}" required></label>
+    <button type="submit">Change email</button>
+  </form>
+  {% endif %}
+  {% if current_user.role in ["owner", "admin"] and person.id != current_user.id and person.active %}
+  <form method="post" action="{{ slug }}/users/{{ person.id }}" class="danger">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="_method" value="delete">
+    <button type="submit">Deactivate {{ person.name }}</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Confirm email · Fizzy{% endblock %}
+{% block body %}
+<section class="gate">
+  <p class="kicker">{{ email }}</p>
+  <h1>Confirm this address</h1>
+  <p>There is no mailer. The confirmation lives on this page for 30 minutes.</p>
+  <form method="post" action="{{ slug }}/users/{{ user_id }}/email_addresses/{{ token }}/confirmation" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Use {{ email }}</button>
+  </form>
+</section>
+{% endblock %}

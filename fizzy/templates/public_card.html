@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ view.card.title or "Card" }} · Fizzy{% endblock %}
+{% block body %}
+<article class="perma">
+  <p class="kicker"><a href="{{ slug }}/public/boards/{{ key }}">{{ board.name }}</a> · #{{ view.card.number }}</p>
+  <h1>{{ view.card.title or "Untitled" }}</h1>
+  {% if view.description_html %}<div class="prose">{{ view.description_html|safe }}</div>{% endif %}
+  {% if view.image %}
+  <figure class="hero"><img alt="" src="{{ slug }}/storage/{{ view.image.id }}"></figure>
+  {% endif %}
+  {% if view.steps %}
+  <h2>Steps</h2>
+  <ul class="steps">
+    {% for step in view.steps %}
+    <li><span class="check{% if step.completed %} on{% endif %}">{{ "✓" if step.completed else "" }}</span> <span class="{% if step.completed %}done{% endif %}">{{ step.content }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <h2>Comments</h2>
+  {% for item in comments %}
+  <article class="comment">
+    <header><strong>{{ item.author.name if item.author else "Someone" }}</strong></header>
+    <div class="prose">{{ item.html|safe }}</div>
+  </article>
+  {% else %}
+  <p class="empty">No comments.</p>
+  {% endfor %}
+</article>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Log in · Fizzy{% endblock %}
+{% block body %}
+<section class="gate">
+  <p class="kicker">Local Fizzy</p>
+  <h1>Pick up where the board left off.</h1>
+  <p>Enter the email on the identity in this database. The sign-in code appears on the next screen, because this app does not send mail.</p>
+  <form method="post" action="/login" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Email <input type="email" name="email_address" required autofocus></label>
+    <button type="submit">Email me a code</button>
+  </form>
+  <p class="quiet">No identity yet? <a href="/signup">Create an account</a>.</p>
+</section>
+{% endblock %}
