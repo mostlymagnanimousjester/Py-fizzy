@@ -55,9 +55,22 @@
       item.removeAttribute("aria-selected");
     });
     if (!card) return;
+    // The card outline is drawn only inside a column that is itself selected.
+    const column = card.closest("section.cards");
+    document.querySelectorAll("section.cards[aria-selected='true']").forEach(function (item) {
+      if (item !== column) item.removeAttribute("aria-selected");
+    });
+    if (column) column.setAttribute("aria-selected", "true");
     card.setAttribute("aria-selected", "true");
-    if (document.activeElement !== card) card.focus({ preventScroll: true });
+    const active = document.activeElement;
+    const field = active && active.closest && active.closest("input, textarea, select, [contenteditable]");
+    if (!field && active !== card) card.focus({ preventScroll: true });
     card.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  function selectFirstMaybe() {
+    const cards = visibleCards(document.getElementById("maybe"));
+    if (cards.length) selectCard(cards[0]);
   }
 
   function selectedCard() {
@@ -66,8 +79,9 @@
     return card;
   }
 
-  function showColumn(column) {
+  function showColumn(column, options) {
     if (!column) return;
+    const choose = !options || options.select !== false;
     if (isDesktop()) {
       columns().forEach(function (item) {
         if (item.id === "maybe") setExpanded(item, true);
@@ -86,6 +100,7 @@
       });
       column.scrollIntoView({ behavior: "smooth", inline: "center" });
     }
+    if (!choose) return;
     const cards = visibleCards(column);
     if (cards.length) selectCard(cards[0]);
     else {
@@ -116,12 +131,9 @@
     });
     if (isDesktop()) {
       const last = saved[saved.length - 1];
-      if (last) showColumn(last);
-      else {
-        const maybe = document.getElementById("maybe");
-        const cards = visibleCards(maybe);
-        if (cards.length) selectCard(cards[0]);
-      }
+      // A remembered column stays open, but keys start on the first Maybe card.
+      if (last) showColumn(last, { select: false });
+      selectFirstMaybe();
       return;
     }
     if (saved.length) showColumn(saved[saved.length - 1]);
@@ -453,6 +465,17 @@
   }
 
   paintBubbles(document);
+
+  document.addEventListener("mouseover", function (event) {
+    if (event.buttons || document.querySelector("dialog[open]")) return;
+    const card = event.target.closest && event.target.closest("article.card");
+    if (!card || !card.closest("#board-stage, .card-columns")) return;
+    if (event.relatedTarget && card.contains(event.relatedTarget)) return;
+    const column = card.closest("section.cards");
+    if (column && column.classList.contains("is-collapsed")) return;
+    if (card.getAttribute("aria-selected") === "true") return;
+    selectCard(card);
+  });
 
   if (boardRoot()) {
     restoreColumns();
