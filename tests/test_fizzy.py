@@ -11,8 +11,21 @@ from fizzy import create_app
 from fizzy.codec import base36_to_bytes, bytes_to_base36, uuid7_bytes
 from fizzy import store
 from fizzy.db import connect
+from fizzy.migrate import MIGRATION_VERSIONS
+from fizzy.schema import SCHEMA_VERSION
 
 SAMPLE = "01jcqzx8h0000000000000000"
+
+
+def _table(conn, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (name,),
+    ).fetchone() is not None
+
+
+def _columns(conn, name: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f'PRAGMA table_info("{name}")')}
 
 
 def app_in(directory: Path):
@@ -44,8 +57,10 @@ class SchemaTests(unittest.TestCase):
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'"
             ).fetchone()
             self.assertIsNotNone(row)
-            version = conn.execute("SELECT version FROM schema_migrations").fetchone()
-            self.assertEqual(version["version"], "20260828120000")
+            versions = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")}
+            self.assertEqual(versions, set(MIGRATION_VERSIONS))
+            self.assertEqual(MIGRATION_VERSIONS[-1], SCHEMA_VERSION)
+            self.assertIn("20260828120000", versions)
             fts = conn.execute(
                 "SELECT name FROM sqlite_master WHERE name='search_records_fts'"
             ).fetchone()
@@ -53,7 +68,258 @@ class SchemaTests(unittest.TestCase):
             conn.close()
             again = connect(path)
             count = again.execute("SELECT COUNT(*) AS n FROM schema_migrations").fetchone()
-            self.assertEqual(count["n"], 1)
+            self.assertEqual(count["n"], len(MIGRATION_VERSIONS))
+            again.close()
+
+    def test_older_ruby_file_is_migrated_on_open(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "old.sqlite3"
+            account = b"\x01" * 16
+            identity = b"\x02" * 16
+            membership = b"\x03" * 16
+            user = b"\x04" * 16
+            board = b"\x05" * 16
+            card = b"\x06" * 16
+            comment = b"\x07" * 16
+            reaction = b"\x08" * 16
+            event = b"\x09" * 16
+            notification = b"\x0a" * 16
+            now = "2026-01-01 00:00:00.000000"
+            raw = sqlite3.connect(path)
+            raw.executescript(
+                """
+                CREATE TABLE schema_migrations (version varchar NOT NULL PRIMARY KEY);
+                CREATE TABLE accounts (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    name varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE identities (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    email_address varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE memberships (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    identity_id blob NOT NULL,
+                    join_code varchar,
+                    tenant varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE users (
+                    id blob PRIMARY KEY NOT NULL,
+                    account_id blob,
+                    active boolean NOT NULL DEFAULT 1,
+                    created_at datetime NOT NULL,
+                    membership_id blob,
+                    name varchar NOT NULL,
+                    role varchar NOT NULL DEFAULT 'member',
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE boards (
+                    id blob PRIMARY KEY NOT NULL,
+                    account_id blob,
+                    all_access boolean NOT NULL DEFAULT 0,
+                    created_at datetime NOT NULL,
+                    creator_id blob NOT NULL,
+                    name varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE cards (
+                    id blob PRIMARY KEY NOT NULL,
+                    account_id blob,
+                    board_id blob NOT NULL,
+                    created_at datetime NOT NULL,
+                    creator_id blob NOT NULL,
+                    last_active_at datetime NOT NULL,
+                    status varchar NOT NULL DEFAULT 'published',
+                    title varchar,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE comments (
+                    id blob PRIMARY KEY NOT NULL,
+                    account_id blob,
+                    card_id blob NOT NULL,
+                    created_at datetime NOT NULL,
+                    creator_id blob NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE reactions (
+                    id blob PRIMARY KEY NOT NULL,
+                    comment_id blob NOT NULL,
+                    content varchar(16) NOT NULL,
+                    created_at datetime NOT NULL,
+                    reacter_id blob NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE events (
+                    id blob PRIMARY KEY NOT NULL,
+                    account_id blob,
+                    action varchar NOT NULL,
+                    board_id blob NOT NULL,
+                    created_at datetime NOT NULL,
+                    creator_id blob NOT NULL,
+                    eventable_id blob NOT NULL,
+                    eventable_type varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE notifications (
+                    id blob PRIMARY KEY NOT NULL,
+                    account_id blob,
+                    created_at datetime NOT NULL,
+                    read_at datetime,
+                    source_id blob NOT NULL,
+                    source_type varchar NOT NULL,
+                    updated_at datetime NOT NULL,
+                    user_id blob NOT NULL
+                );
+                CREATE TABLE card_activity_spikes (
+                    id blob PRIMARY KEY NOT NULL,
+                    card_id blob NOT NULL,
+                    created_at datetime NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE search_results (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE account_exports (
+                    id blob PRIMARY KEY NOT NULL,
+                    account_id blob NOT NULL,
+                    user_id blob NOT NULL,
+                    status varchar NOT NULL DEFAULT 'pending',
+                    completed_at datetime,
+                    created_at datetime NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                """
+            )
+            raw.execute("INSERT INTO schema_migrations (version) VALUES ('20251111122540')")
+            raw.execute(
+                "INSERT INTO accounts (id, created_at, name, updated_at) VALUES (?, ?, 'Home', ?)",
+                (account, now, now),
+            )
+            raw.execute(
+                "INSERT INTO identities (id, created_at, email_address, updated_at) VALUES (?, ?, 'ada@example.com', ?)",
+                (identity, now, now),
+            )
+            raw.execute(
+                "INSERT INTO memberships (id, created_at, identity_id, tenant, updated_at) VALUES (?, ?, ?, 'home', ?)",
+                (membership, now, identity, now),
+            )
+            raw.execute(
+                """INSERT INTO users
+                   (id, account_id, created_at, membership_id, name, role, updated_at)
+                   VALUES (?, ?, ?, ?, 'Ada', 'admin', ?)""",
+                (user, account, now, membership, now),
+            )
+            raw.execute(
+                """INSERT INTO boards
+                   (id, account_id, created_at, creator_id, name, updated_at)
+                   VALUES (?, ?, ?, ?, 'Product', ?)""",
+                (board, account, now, user, now),
+            )
+            raw.execute(
+                """INSERT INTO cards
+                   (id, account_id, board_id, created_at, creator_id, last_active_at, title, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'Ship it', ?)""",
+                (card, account, board, now, user, now, now),
+            )
+            raw.execute(
+                """INSERT INTO comments
+                   (id, account_id, card_id, created_at, creator_id, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (comment, account, card, now, user, now),
+            )
+            raw.execute(
+                """INSERT INTO reactions
+                   (id, comment_id, content, created_at, reacter_id, updated_at)
+                   VALUES (?, ?, 'Yes', ?, ?, ?)""",
+                (reaction, comment, now, user, now),
+            )
+            raw.execute(
+                """INSERT INTO events
+                   (id, account_id, action, board_id, created_at, creator_id, eventable_id, eventable_type, updated_at)
+                   VALUES (?, ?, 'card_published', ?, ?, ?, ?, 'Card', ?)""",
+                (event, account, board, now, user, card, now),
+            )
+            raw.execute(
+                """INSERT INTO notifications
+                   (id, account_id, created_at, source_id, source_type, updated_at, user_id)
+                   VALUES (?, ?, ?, ?, 'Event', ?, ?)""",
+                (notification, account, now, event, now, user),
+            )
+            raw.execute(
+                "INSERT INTO card_activity_spikes (id, card_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (b"\x0b" * 16, card, now, now),
+            )
+            raw.execute(
+                "INSERT INTO card_activity_spikes (id, card_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (b"\x0c" * 16, card, "2026-01-02 00:00:00.000000", "2026-01-02 00:00:00.000000"),
+            )
+            raw.execute(
+                """INSERT INTO account_exports
+                   (id, account_id, user_id, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (b"\x0d" * 16, account, user, now, now),
+            )
+            raw.commit()
+            raw.close()
+
+            conn = connect(path)
+            self.assertFalse(_table(conn, "memberships"))
+            self.assertFalse(_table(conn, "search_results"))
+            self.assertFalse(_table(conn, "account_exports"))
+            self.assertTrue(_table(conn, "exports"))
+            self.assertTrue(_table(conn, "identity_transfers"))
+            self.assertTrue(_table(conn, "action_pack_passkeys"))
+            self.assertIn("verified_at", _columns(conn, "users"))
+            self.assertNotIn("membership_id", _columns(conn, "users"))
+            self.assertIn("staff", _columns(conn, "identities"))
+            self.assertIn("number", _columns(conn, "cards"))
+            self.assertIn("reactable_type", _columns(conn, "reactions"))
+            self.assertNotIn("comment_id", _columns(conn, "reactions"))
+            self.assertIn("card_id", _columns(conn, "notifications"))
+            self.assertIn("type", _columns(conn, "exports"))
+            opened = conn.execute("SELECT identity_id, role FROM users").fetchone()
+            self.assertEqual(opened["identity_id"], bytes_to_base36(identity))
+            self.assertEqual(opened["role"], "owner")
+            numbered = conn.execute("SELECT number FROM cards").fetchone()
+            self.assertEqual(numbered["number"], 1)
+            counted = conn.execute("SELECT cards_count FROM accounts").fetchone()
+            self.assertEqual(counted["cards_count"], 1)
+            reacted = conn.execute("SELECT content, reactable_type, reactable_id FROM reactions").fetchone()
+            self.assertEqual(reacted["content"], "Yes")
+            self.assertEqual(reacted["reactable_type"], "Comment")
+            self.assertEqual(reacted["reactable_id"], bytes_to_base36(comment))
+            noted = conn.execute("SELECT card_id, unread_count FROM notifications").fetchone()
+            self.assertEqual(noted["card_id"], bytes_to_base36(card))
+            self.assertEqual(noted["unread_count"], 1)
+            spikes = conn.execute("SELECT COUNT(*) AS n FROM card_activity_spikes").fetchone()
+            self.assertEqual(spikes["n"], 1)
+            versions = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")}
+            self.assertEqual(versions, set(MIGRATION_VERSIONS))
+            conn.execute("UPDATE notifications SET unread_count = 5")
+            conn.commit()
+            conn.close()
+
+            again = connect(path)
+            self.assertEqual(
+                again.execute("SELECT unread_count FROM notifications").fetchone()["unread_count"],
+                5,
+            )
+            self.assertEqual(
+                again.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"],
+                1,
+            )
+            self.assertEqual(
+                again.execute("SELECT identity_id FROM users").fetchone()["identity_id"],
+                bytes_to_base36(identity),
+            )
             again.close()
 
 

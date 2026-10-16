@@ -4,7 +4,7 @@ This is a personal localhost tool. The bar for each feature was: does a Fizzy SQ
 
 ## Kept
 
-- **SQLite only.** `FIZZY_DATABASE` is one file. MySQL and the 16 `search_records_*` shards are not opened. New files get the tables from `db/schema_sqlite.rb` (version `20260828120000`), including `search_records` with an integer primary key and an FTS5 table so the file shape is familiar. DDL runs only when `accounts` is missing.
+- **SQLite only.** `FIZZY_DATABASE` is one file. MySQL and the 16 `search_records_*` shards are not opened. New files get the tables from `db/schema_sqlite.rb` (version `20260828120000`), including `search_records` with an integer primary key and an FTS5 table so the file shape is familiar. Opening any file runs those app migrations in place and stamps every version. SaaS migrations are not applied.
 - **Rails values.** Ids are 16-byte blobs in the file and 25-character base36 strings in JSON and URLs. Booleans are `0`/`1`. Timestamps are UTC `YYYY-MM-DD HH:MM:SS.ffffff`. JSON columns stay text. Foreign keys stay off.
 - **Account slug.** `/{external_account_id}/...` matches Fizzy. Card URLs use the card number.
 - **Magic-link login, without mail.** The 6-character code is returned in the HTML page and in the JSON body. Signup creates the identity, account, owner, and system user, then logs in. There is no password and no passkey table usage.

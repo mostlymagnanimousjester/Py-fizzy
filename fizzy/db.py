@@ -16,6 +16,7 @@ from .codec import (
     is_fizzy_id,
     parse_dt,
 )
+from .migrate import upgrade
 from .schema import ensure
 
 _TYPE_CACHE: dict[str, dict[str, dict[str, str]]] = {}
@@ -31,6 +32,7 @@ def connect(path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA journal_mode=WAL")
     ensure(conn)
+    upgrade(conn)
     path = str(database)
     _TYPE_CACHE[path] = _load_types(conn)
     _PATHS[id(conn)] = path

@@ -1,9 +1,7 @@
 """SQLite DDL compatible with Fizzy's db/schema_sqlite.rb (Rails 8).
 
-UUID columns are blobs. A database produced by the Ruby app is opened as-is.
-This DDL runs only when the file has no `accounts` table yet. An older
-`reactions` table, from before reactions became polymorphic, is migrated in
-place to the current columns.
+UUID columns are blobs. This DDL runs only when the file has no `accounts`
+table yet. An existing file is brought up to this shape by `fizzy.migrate`.
 """
 
 from __future__ import annotations
@@ -651,30 +649,47 @@ def _tables() -> list[tuple[str, list[tuple[str, str, str | None]], list[tuple[s
     return tables
 
 
-def statements() -> list[str]:
+def _create_table_sql(name: str, cols, ident: bool) -> str:
+    parts = []
+    if ident:
+        parts.append('"id" blob NOT NULL PRIMARY KEY')
+    for col_name, declared, suffix in cols:
+        piece = f'"{col_name}" {declared}'
+        if suffix:
+            piece += f" {suffix}"
+        parts.append(piece)
+    return f'CREATE TABLE IF NOT EXISTS "{name}" ({", ".join(parts)})'
+
+
+def table_statements() -> list[str]:
     sql = [
         'CREATE TABLE IF NOT EXISTS "schema_migrations" ("version" varchar NOT NULL PRIMARY KEY)',
         'CREATE TABLE IF NOT EXISTS "ar_internal_metadata" ('
         '"key" varchar NOT NULL PRIMARY KEY, "value" varchar, '
         '"created_at" datetime(6) NOT NULL, "updated_at" datetime(6) NOT NULL)',
     ]
-    for name, cols, indexes, ident in _tables():
-        parts = []
-        if ident:
-            parts.append('"id" blob NOT NULL PRIMARY KEY')
-        for col_name, declared, suffix in cols:
-            piece = f'"{col_name}" {declared}'
-            if suffix:
-                piece += f" {suffix}"
-            parts.append(piece)
-        sql.append(f'CREATE TABLE IF NOT EXISTS "{name}" ({", ".join(parts)})')
-        for index_name, columns, unique in indexes:
-            kind = "UNIQUE INDEX" if unique else "INDEX"
-            sql.append(f'CREATE {kind} IF NOT EXISTS "{index_name}" ON "{name}" ({columns})')
+    for name, cols, _indexes, ident in _tables():
+        sql.append(_create_table_sql(name, cols, ident))
     sql.append(
         "CREATE VIRTUAL TABLE IF NOT EXISTS search_records_fts USING fts5("
         "title, content, tokenize='porter')"
     )
+    return sql
+
+
+def index_specs() -> list[tuple[str, str, str, bool]]:
+    specs = []
+    for name, _cols, indexes, _ident in _tables():
+        for index_name, columns, unique in indexes:
+            specs.append((name, index_name, columns, unique))
+    return specs
+
+
+def statements() -> list[str]:
+    sql = table_statements()
+    for name, index_name, columns, unique in index_specs():
+        kind = "UNIQUE INDEX" if unique else "INDEX"
+        sql.append(f'CREATE {kind} IF NOT EXISTS "{index_name}" ON "{name}" ({columns})')
     return sql
 
 
@@ -773,4 +788,3 @@ def ensure(conn) -> None:
             ("environment", "development", now, now),
         )
         conn.commit()
-    _migrate_reactions(conn)

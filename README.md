@@ -34,7 +34,7 @@ FIZZY_STORAGE=/path/to/storage \
 python -m fizzy
 ```
 
-Schema is applied only when `accounts` is missing. An existing Fizzy file is opened as-is: blob UUIDs, `0`/`1` booleans, and `YYYY-MM-DD HH:MM:SS.ffffff` timestamps. Personal access tokens already in `identity_access_tokens` work as `Authorization: Bearer` values. The browser session cookie is this app's own session id, so log in again in the browser (the code appears on screen).
+Opening the file runs the Fizzy app migrations through `20260828120000` and records them in `schema_migrations`. A database from an older Ruby release gains the current columns and tables in place, including polymorphic reactions, card numbers, and `identity_transfers`. A file this app already created is left intact and the historical versions are stamped. SaaS tables and the MySQL search shards are not created. Blob UUIDs, `0`/`1` booleans, and `YYYY-MM-DD HH:MM:SS.ffffff` timestamps stay as they are. Personal access tokens already in `identity_access_tokens` work as `Authorization: Bearer` values. The browser session cookie is this app's own session id, so log in again in the browser (the code appears on screen).
 
 ## API
 
