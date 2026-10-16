@@ -1,12 +1,15 @@
 """SQLite DDL compatible with Fizzy's db/schema_sqlite.rb (Rails 8).
 
-UUID columns are blobs. A database produced by the Ruby app is opened as-is;
-this DDL runs only when the file has no `accounts` table yet.
+UUID columns are blobs. A database produced by the Ruby app is opened as-is.
+This DDL runs only when the file has no `accounts` table yet. An older
+`reactions` table, from before reactions became polymorphic, is migrated in
+place to the current columns.
 """
 
 from __future__ import annotations
 
 SCHEMA_VERSION = "20260828120000"
+REACTIONS_POLYMORPHIC_VERSION = "20260121155752"
 
 # (name, declared type, sql suffix or None)
 # pk columns are omitted here; tables with an id get a blob primary key.
@@ -675,21 +678,99 @@ def statements() -> list[str]:
     return sql
 
 
+def _column_names(conn, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()}
+
+
+def _migrate_reactions(conn) -> None:
+    """Port of db/migrate/20260121155752_make_reactions_polymorphic.rb.
+
+    Older files store a reaction on comment_id. The current table stores
+    reactable_type and reactable_id, and comment_id is gone.
+    """
+    columns = _column_names(conn, "reactions")
+    if not columns or ("reactable_type" in columns and "comment_id" not in columns):
+        return
+    if "comment_id" not in columns:
+        return
+    account_sql = "COALESCE(old.account_id, comments.account_id)" if "account_id" in columns else "comments.account_id"
+    reactable_id_sql = "COALESCE(old.reactable_id, old.comment_id)" if "reactable_id" in columns else "old.comment_id"
+    reactable_type_sql = "COALESCE(old.reactable_type, 'Comment')" if "reactable_type" in columns else "'Comment'"
+    missing = conn.execute(
+        f"""
+        SELECT COUNT(*) AS n FROM reactions AS old
+        LEFT JOIN comments ON comments.id = old.comment_id
+        WHERE {account_sql} IS NULL
+        """
+    ).fetchone()["n"]
+    if missing:
+        raise RuntimeError(
+            f"{missing} reaction(s) have no account, so the reactions table cannot be migrated"
+        )
+    conn.execute("ALTER TABLE reactions RENAME TO reactions__pre_polymorphic")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE reactions (
+                "id" blob NOT NULL PRIMARY KEY,
+                "account_id" blob NOT NULL,
+                "content" varchar(16) NOT NULL,
+                "created_at" datetime(6) NOT NULL,
+                "reactable_id" blob NOT NULL,
+                "reactable_type" varchar(255) NOT NULL,
+                "reacter_id" blob NOT NULL,
+                "updated_at" datetime(6) NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            f"""
+            INSERT INTO reactions (
+                id, account_id, content, created_at, reactable_id, reactable_type, reacter_id, updated_at
+            )
+            SELECT old.id, {account_sql}, old.content, old.created_at,
+                   {reactable_id_sql}, {reactable_type_sql}, old.reacter_id, old.updated_at
+            FROM reactions__pre_polymorphic AS old
+            LEFT JOIN comments ON comments.id = old.comment_id
+            """
+        )
+        conn.execute("DROP TABLE reactions__pre_polymorphic")
+        conn.execute('CREATE INDEX "index_reactions_on_account_id" ON reactions (account_id)')
+        conn.execute(
+            'CREATE INDEX "index_reactions_on_reactable_type_and_reactable_id" '
+            "ON reactions (reactable_type, reactable_id)"
+        )
+        conn.execute('CREATE INDEX "index_reactions_on_reacter_id" ON reactions (reacter_id)')
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)",
+            (REACTIONS_POLYMORPHIC_VERSION,),
+        )
+        conn.commit()
+    except Exception:
+        names = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "reactions__pre_polymorphic" in names:
+            if "reactions" in names:
+                conn.execute("DROP TABLE reactions")
+            conn.execute("ALTER TABLE reactions__pre_polymorphic RENAME TO reactions")
+            conn.commit()
+        raise
+
+
 def ensure(conn) -> None:
     row = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='accounts'"
     ).fetchone()
-    if row:
-        return
-    conn.execute("PRAGMA foreign_keys=OFF")
-    for statement in statements():
-        conn.execute(statement)
-    conn.execute(
-        'INSERT INTO schema_migrations (version) VALUES (?)', (SCHEMA_VERSION,)
-    )
-    now = "1970-01-01 00:00:00.000000"
-    conn.execute(
-        'INSERT INTO ar_internal_metadata (key, value, created_at, updated_at) VALUES (?, ?, ?, ?)',
-        ("environment", "development", now, now),
-    )
-    conn.commit()
+    if not row:
+        conn.execute("PRAGMA foreign_keys=OFF")
+        for statement in statements():
+            conn.execute(statement)
+        conn.execute(
+            'INSERT INTO schema_migrations (version) VALUES (?)', (SCHEMA_VERSION,)
+        )
+        now = "1970-01-01 00:00:00.000000"
+        conn.execute(
+            'INSERT INTO ar_internal_metadata (key, value, created_at, updated_at) VALUES (?, ?, ?, ?)',
+            ("environment", "development", now, now),
+        )
+        conn.commit()
+    _migrate_reactions(conn)

@@ -59,11 +59,6 @@ def column_type(conn: sqlite3.Connection, table: str, column: str) -> str:
     return _TYPE_CACHE.get(path, {}).get(table, {}).get(column, "")
 
 
-def has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
-    path = _PATHS.get(id(conn), "")
-    return column in _TYPE_CACHE.get(path, {}).get(table, {})
-
-
 def _row_factory(cursor, row):
     record = {}
     for index, spec in enumerate(cursor.description):

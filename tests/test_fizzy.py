@@ -417,7 +417,7 @@ class SwapTests(unittest.TestCase):
             self.assertEqual(listed.status_code, 200, listed.get_data(as_text=True))
             self.assertEqual(json.loads(listed.get_data(as_text=True))[0]["number"], 7)
 
-    def test_older_reactions_table_still_opens_a_board(self):
+    def test_older_reactions_table_is_migrated_before_the_board_opens(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             application = app_in(root)
@@ -481,9 +481,17 @@ class SwapTests(unittest.TestCase):
             self.assertIn("Ship the port", page.get_data(as_text=True))
 
             conn = connect(root / "fizzy.sqlite3")
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(reactions)")}
+            self.assertIn("reactable_type", columns)
+            self.assertIn("reactable_id", columns)
+            self.assertNotIn("comment_id", columns)
             found = store.reactions_of(conn, "Comment", comment_id)
             self.assertEqual([row["content"] for row in found], ["Yes"])
+            self.assertEqual(found[0]["reactable_type"], "Comment")
+            self.assertEqual(found[0]["reactable_id"], comment_id)
             self.assertEqual(store.reactions_of(conn, "Card", card.get_json()["id"]), [])
+            versions = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")}
+            self.assertIn("20260121155752", versions)
             conn.close()
 
 

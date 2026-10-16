@@ -19,7 +19,7 @@ from .constants import (
     STALLED_DAYS,
     WEBHOOK_ACTIONS,
 )
-from .db import delete_where, enc, has_column, insert, q, q1, update as write_row
+from .db import delete_where, enc, insert, q, q1, update as write_row
 from .errors import FizzyError, forbidden, invalid, not_found
 from .text import mention_ids_from_html, plain_text, to_html
 
@@ -943,7 +943,6 @@ def delete_card(conn, user: dict, card: dict, force: bool = False):
     comments = q(conn, "SELECT id FROM comments WHERE card_id = ?", (_id(conn, "comments", "card_id", card["id"]),))
     comment_ids = [row["id"] for row in comments]
     conn.execute("DELETE FROM notifications WHERE card_id = ?", (_id(conn, "notifications", "card_id", card["id"]),))
-    _delete_reactions(conn, "Card", [card["id"]])
     conn.execute(
         "DELETE FROM events WHERE eventable_type = 'Card' AND eventable_id = ?",
         (_id(conn, "events", "eventable_id", card["id"]),),
@@ -955,7 +954,10 @@ def delete_card(conn, user: dict, card: dict, force: bool = False):
             f"DELETE FROM events WHERE eventable_type = 'Comment' AND eventable_id IN ({marks})",
             encoded,
         )
-        _delete_reactions(conn, "Comment", comment_ids)
+        conn.execute(
+            f"DELETE FROM reactions WHERE reactable_type = 'Comment' AND reactable_id IN ({marks})",
+            _ids(conn, "reactions", "reactable_id", comment_ids),
+        )
         conn.execute(
             f"DELETE FROM mentions WHERE source_type = 'Comment' AND source_id IN ({marks})",
             _ids(conn, "mentions", "source_id", comment_ids),
@@ -1406,7 +1408,10 @@ def delete_comment(conn, user: dict, comment: dict):
         "DELETE FROM events WHERE eventable_type = 'Comment' AND eventable_id = ?",
         (_id(conn, "events", "eventable_id", comment["id"]),),
     )
-    _delete_reactions(conn, "Comment", [comment["id"]])
+    conn.execute(
+        "DELETE FROM reactions WHERE reactable_type = 'Comment' AND reactable_id = ?",
+        (_id(conn, "reactions", "reactable_id", comment["id"]),),
+    )
     conn.execute(
         "DELETE FROM mentions WHERE source_type = 'Comment' AND source_id = ?",
         (_id(conn, "mentions", "source_id", comment["id"]),),
@@ -1415,44 +1420,15 @@ def delete_comment(conn, user: dict, comment: dict):
     delete_where(conn, "comments", id=comment["id"])
 
 
-def _reactions_are_polymorphic(conn) -> bool:
-    return has_column(conn, "reactions", "reactable_type")
-
-
-def _delete_reactions(conn, reactable_type: str, reactable_ids: list[str]):
-    if not reactable_ids:
-        return
-    marks = ",".join("?" * len(reactable_ids))
-    if _reactions_are_polymorphic(conn):
-        conn.execute(
-            f"DELETE FROM reactions WHERE reactable_type = ? AND reactable_id IN ({marks})",
-            [reactable_type, *_ids(conn, "reactions", "reactable_id", reactable_ids)],
-        )
-        return
-    if reactable_type == "Comment" and has_column(conn, "reactions", "comment_id"):
-        conn.execute(
-            f"DELETE FROM reactions WHERE comment_id IN ({marks})",
-            _ids(conn, "reactions", "comment_id", reactable_ids),
-        )
-
-
 def reactions_of(conn, reactable_type: str, reactable_id: str):
-    if _reactions_are_polymorphic(conn):
-        return q(
-            conn,
-            """
-            SELECT reactions.* FROM reactions
-            WHERE reactable_type = ? AND reactable_id = ?
-            ORDER BY created_at
-            """,
-            (reactable_type, _id(conn, "reactions", "reactable_id", reactable_id)),
-        )
-    if reactable_type != "Comment" or not has_column(conn, "reactions", "comment_id"):
-        return []
     return q(
         conn,
-        "SELECT reactions.* FROM reactions WHERE comment_id = ? ORDER BY created_at",
-        (_id(conn, "reactions", "comment_id", reactable_id),),
+        """
+        SELECT reactions.* FROM reactions
+        WHERE reactable_type = ? AND reactable_id = ?
+        ORDER BY created_at
+        """,
+        (reactable_type, _id(conn, "reactions", "reactable_id", reactable_id)),
     )
 
 
@@ -1460,28 +1436,6 @@ def add_reaction(conn, user: dict, account_id: str, reactable_type: str, reactab
     content = content.strip()
     if not content or len(content) > 16:
         raise invalid({"content": ["must be 1 to 16 characters"]})
-    if not _reactions_are_polymorphic(conn):
-        if reactable_type != "Comment":
-            raise invalid({"content": ["This database stores reactions on comments only."]})
-        existing = q1(
-            conn,
-            """
-            SELECT * FROM reactions
-            WHERE comment_id = ? AND reacter_id = ? AND content = ?
-            """,
-            (
-                _id(conn, "reactions", "comment_id", reactable_id),
-                _id(conn, "reactions", "reacter_id", user["id"]),
-                content,
-            ),
-        )
-        if existing:
-            return existing
-        cols = {"content": content, "comment_id": reactable_id, "reacter_id": user["id"]}
-        if has_column(conn, "reactions", "account_id"):
-            cols["account_id"] = account_id
-        reaction_id = insert(conn, "reactions", **cols)
-        return q1(conn, "SELECT * FROM reactions WHERE id = ?", (_id(conn, "reactions", "id", reaction_id),))
     existing = q1(
         conn,
         """
