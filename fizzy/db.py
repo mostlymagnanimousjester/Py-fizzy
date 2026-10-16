@@ -10,11 +10,10 @@ from .codec import (
     BOOL_COLUMNS,
     JSON_COLUMNS,
     as_bool,
-    base36_to_bytes,
     decode_uuid,
     dump_dt,
-    is_fizzy_id,
     parse_dt,
+    uuid_bytes,
 )
 from .migrate import upgrade
 from .schema import ensure
@@ -84,13 +83,25 @@ def enc(conn: sqlite3.Connection, table: str, column: str, value):
         return None
     declared = column_type(conn, table, column).lower()
     id_like = column == "id" or column.endswith("_id")
-    if id_like and ("blob" in declared or declared == ""):
+    # Integer keys such as external_account_id stay numbers. Every other id is
+    # a UUID, including columns declared uuid, binary, varchar, or blob(16).
+    # Writing a base36 string into a blob column makes the next session join
+    # miss, and the login cookie is thrown away.
+    uuid_column = id_like and "int" not in declared and (
+        "blob" in declared
+        or "binary" in declared
+        or "uuid" in declared
+        or "char" in declared
+        or declared in {"", "text", "string"}
+    )
+    if uuid_column:
         if isinstance(value, memoryview):
-            return value.tobytes()
-        if isinstance(value, bytes):
-            return value
-        if isinstance(value, str) and is_fizzy_id(value):
-            return base36_to_bytes(value)
+            value = value.tobytes()
+        if isinstance(value, (bytes, bytearray)):
+            return bytes(value)
+        converted = uuid_bytes(value)
+        if converted is not None:
+            return converted
         return value
     if "bool" in declared:
         return 1 if as_bool(value) else 0

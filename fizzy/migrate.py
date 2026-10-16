@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 import sqlite3
 
+from .codec import dump_dt, utcnow, uuid7_bytes, uuid_bytes
 from .schema import (
     SCHEMA_VERSION,
     _column_names,
@@ -133,6 +134,7 @@ _ACCOUNT_FROM_PARENT = (
 def upgrade(conn: sqlite3.Connection) -> None:
     """Apply every app migration that this file is still missing."""
     _rename_account_exports(conn)
+    _normalize_stored_ids(conn)
     _fold_memberships(conn)
     for statement in table_statements():
         conn.execute(statement)
@@ -187,34 +189,301 @@ def _rename_account_exports(conn) -> None:
 
 
 def _fold_memberships(conn) -> None:
-    """Port of drop_memberships: users.identity_id replaces membership_id."""
+    """Port of drop_memberships: users.identity_id replaces membership_id.
+
+    Ruby's migration adds ``identity_id`` and then drops ``memberships`` without
+    copying the foreign key. This step copies it first. The copy used to require
+    the two id columns to be the same SQLite value, so a blob membership and a
+    hex membership id matched nothing and the link was deleted. Login then found
+    the email and landed on an empty account list.
+    """
     if not _has_table(conn, "users"):
         return
-    columns = _column_names(conn, "users")
-    if "membership_id" not in columns:
-        if _has_table(conn, "memberships"):
-            conn.execute("DROP TABLE memberships")
-        return
-    if "identity_id" not in columns:
+    if "identity_id" not in _column_names(conn, "users"):
         conn.execute('ALTER TABLE users ADD COLUMN "identity_id" blob')
-    if _has_table(conn, "memberships") and "identity_id" in _column_names(conn, "memberships"):
+    _link_users_by_email(conn)
+    if _has_table(conn, "memberships"):
+        _copy_membership_identities(conn)
+    # A membership row that still has not been copied is the only record of who
+    # owns the account. Keep it until a human user actually received an identity.
+    if _has_table(conn, "memberships") and _membership_rows(conn) and _humans_missing_identity(conn):
+        return
+    if "membership_id" in _column_names(conn, "users"):
+        _drop_indexes_using(conn, "users", "membership_id")
+        try:
+            conn.execute('ALTER TABLE users DROP COLUMN "membership_id"')
+        except sqlite3.OperationalError:
+            # A view or an index SQLite will not drop must not block the rest of
+            # the migration. The extra column is nullable and unread by this app.
+            pass
+    if _has_table(conn, "memberships"):
+        conn.execute("DROP TABLE memberships")
+    _link_lone_identity(conn)
+
+
+def _normalize_stored_ids(conn) -> None:
+    """Rewrite hex, dashed, and base36 ids to 16-byte blobs.
+
+    Session lookup joins ``identities.id = sessions.identity_id``. A new
+    session stored as a blob cannot see an identity still stored as text, so
+    the code is accepted and the next request is sent back to login.
+    """
+    tables = conn.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    for table in tables:
+        name = table["name"]
+        sql = table["sql"] or ""
+        if "fts" in name or "VIRTUAL" in sql.upper():
+            continue
+        try:
+            info = conn.execute(f'PRAGMA table_info("{name}")').fetchall()
+        except sqlite3.OperationalError:
+            continue
+        for column in info:
+            col_name = column["name"]
+            if col_name != "id" and not col_name.endswith("_id"):
+                continue
+            declared = (column["type"] or "").lower()
+            if "int" in declared:
+                continue
+            if not (
+                "blob" in declared
+                or "binary" in declared
+                or "uuid" in declared
+                or "char" in declared
+                or declared in {"", "text", "string"}
+            ):
+                continue
+            try:
+                rows = conn.execute(
+                    f'SELECT rowid AS rid, "{col_name}" AS stored FROM "{name}"'
+                ).fetchall()
+            except sqlite3.OperationalError:
+                break
+            for row in rows:
+                converted = uuid_bytes(row["stored"])
+                if converted is None or _same_id(row["stored"], converted):
+                    continue
+                try:
+                    conn.execute("SAVEPOINT fizzy_id_norm")
+                    conn.execute(
+                        f'UPDATE "{name}" SET "{col_name}" = ? WHERE rowid = ?',
+                        (converted, row["rid"]),
+                    )
+                    conn.execute("RELEASE fizzy_id_norm")
+                except sqlite3.IntegrityError:
+                    conn.execute("ROLLBACK TO fizzy_id_norm")
+                    conn.execute("RELEASE fizzy_id_norm")
+
+
+def _same_id(raw, converted: bytes) -> bool:
+    if isinstance(raw, memoryview):
+        raw = raw.tobytes()
+    return raw == converted
+
+
+def _human_sql(columns: set[str]) -> str:
+    if "role" not in columns:
+        return ""
+    return "AND (role IS NULL OR lower(CAST(role AS TEXT)) != 'system')"
+
+
+def _humans_missing_identity(conn) -> int:
+    columns = _column_names(conn, "users")
+    if "identity_id" not in columns:
+        return 0
+    row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS n FROM users
+        WHERE identity_id IS NULL
+        {_human_sql(columns)}
+        """
+    ).fetchone()
+    return int(row["n"] or 0)
+
+
+def _membership_rows(conn) -> int:
+    if not _has_table(conn, "memberships"):
+        return 0
+    row = conn.execute("SELECT COUNT(*) AS n FROM memberships").fetchone()
+    return int(row["n"] or 0)
+
+
+def _copy_membership_identities(conn) -> None:
+    user_columns = _column_names(conn, "users")
+    member_columns = _column_names(conn, "memberships")
+    if "identity_id" not in user_columns or "identity_id" not in member_columns:
+        return
+    if "membership_id" in user_columns:
         conn.execute(
             """
             UPDATE users SET identity_id = (
                 SELECT identity_id FROM memberships WHERE memberships.id = users.membership_id
             )
             WHERE identity_id IS NULL AND membership_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM memberships
+                WHERE memberships.id = users.membership_id AND memberships.identity_id IS NOT NULL
+              )
             """
         )
-    _drop_indexes_using(conn, "users", "membership_id")
+    if "user_id" in member_columns:
+        conn.execute(
+            """
+            UPDATE users SET identity_id = (
+                SELECT identity_id FROM memberships WHERE memberships.user_id = users.id
+            )
+            WHERE identity_id IS NULL
+              AND EXISTS (
+                SELECT 1 FROM memberships
+                WHERE memberships.user_id = users.id AND memberships.identity_id IS NOT NULL
+              )
+            """
+        )
+    if "email_address" in member_columns and "email_address" in user_columns:
+        conn.execute(
+            """
+            UPDATE users SET identity_id = (
+                SELECT identity_id FROM memberships
+                WHERE lower(trim(memberships.email_address)) = lower(trim(users.email_address))
+                  AND memberships.identity_id IS NOT NULL
+                LIMIT 1
+            )
+            WHERE identity_id IS NULL
+              AND email_address IS NOT NULL
+              AND trim(email_address) != ''
+            """
+        )
+    if "membership_id" not in user_columns:
+        return
+    members = {}
+    for row in conn.execute("SELECT id AS stored, identity_id AS identity FROM memberships"):
+        key = uuid_bytes(row["stored"])
+        identity = uuid_bytes(row["identity"])
+        if key is not None and identity is not None:
+            members[key] = identity
+    pending = conn.execute(
+        """
+        SELECT rowid AS rid, membership_id AS stored FROM users
+        WHERE identity_id IS NULL AND membership_id IS NOT NULL
+        """
+    ).fetchall()
+    for user in pending:
+        identity = members.get(uuid_bytes(user["stored"]))
+        if identity is not None:
+            conn.execute(
+                "UPDATE users SET identity_id = ? WHERE rowid = ?",
+                (identity, user["rid"]),
+            )
+
+
+def _link_users_by_email(conn) -> None:
+    """Older files kept the address on users and the identity on a separate row."""
+    if not _has_table(conn, "users") or not _has_table(conn, "identities"):
+        return
+    columns = _column_names(conn, "users")
+    if "email_address" not in columns or "identity_id" not in columns:
+        return
+    rows = conn.execute(
+        f"""
+        SELECT rowid AS rid, email_address AS email
+        FROM users
+        WHERE identity_id IS NULL
+          AND email_address IS NOT NULL
+          AND trim(email_address) != ''
+          {_human_sql(columns)}
+        """
+    ).fetchall()
+    identity_columns = _column_names(conn, "identities")
+    now = dump_dt(utcnow())
+    for row in rows:
+        email = str(row["email"]).strip().lower()
+        if "@" not in email:
+            continue
+        identity = _identity_bytes_for_email(conn, email, identity_columns, now)
+        if identity is None:
+            continue
+        conn.execute("UPDATE users SET identity_id = ? WHERE rowid = ?", (identity, row["rid"]))
+
+
+def _identity_bytes_for_email(conn, email: str, columns: set[str], now: str):
+    found = conn.execute(
+        "SELECT id AS stored FROM identities WHERE lower(trim(email_address)) = ?",
+        (email,),
+    ).fetchone()
+    if found:
+        return uuid_bytes(found["stored"]) or found["stored"]
+    identity = uuid7_bytes()
+    fields = ["id", "email_address", "created_at", "updated_at"]
+    values: list = [identity, email, now, now]
+    if "staff" in columns:
+        fields.append("staff")
+        values.append(0)
+    quoted = ", ".join(f'"{field}"' for field in fields)
+    placeholders = ", ".join("?" for _ in fields)
     try:
-        conn.execute('ALTER TABLE users DROP COLUMN "membership_id"')
-    except sqlite3.OperationalError:
-        # A view or an index SQLite will not drop must not block the rest of
-        # the migration. The extra column is nullable and unread by this app.
-        pass
-    if _has_table(conn, "memberships"):
-        conn.execute("DROP TABLE memberships")
+        conn.execute("SAVEPOINT fizzy_identity")
+        conn.execute(
+            f"INSERT INTO identities ({quoted}) VALUES ({placeholders})",
+            values,
+        )
+        conn.execute("RELEASE fizzy_identity")
+    except sqlite3.IntegrityError:
+        conn.execute("ROLLBACK TO fizzy_identity")
+        conn.execute("RELEASE fizzy_identity")
+        found = conn.execute(
+            "SELECT id AS stored FROM identities WHERE lower(trim(email_address)) = ?",
+            (email,),
+        ).fetchone()
+        if not found:
+            return None
+        return uuid_bytes(found["stored"]) or found["stored"]
+    return identity
+
+
+def _link_lone_identity(conn) -> None:
+    """Repair one account whose membership row is already gone.
+
+    Linking is only safe when that account is the only one with a single
+    unlinked person and the file has a single unused identity. Several
+    accounts with several identities are left alone.
+    """
+    if not _has_table(conn, "users") or not _has_table(conn, "identities"):
+        return
+    if _has_table(conn, "memberships") or "membership_id" in _column_names(conn, "users"):
+        return
+    columns = _column_names(conn, "users")
+    if "identity_id" not in columns or "account_id" not in columns:
+        return
+    people = conn.execute(
+        f"""
+        SELECT rowid AS rid, account_id AS account
+        FROM users
+        WHERE identity_id IS NULL
+        {_human_sql(columns)}
+        """
+    ).fetchall()
+    groups: dict = {}
+    for person in people:
+        groups.setdefault(person["account"], []).append(person["rid"])
+    singles = {account: rids[0] for account, rids in groups.items() if len(rids) == 1}
+    if len(singles) != 1:
+        return
+    used = set()
+    for row in conn.execute("SELECT identity_id AS stored FROM users WHERE identity_id IS NOT NULL"):
+        key = uuid_bytes(row["stored"])
+        if key is not None:
+            used.add(key)
+    free = []
+    for row in conn.execute("SELECT id AS stored FROM identities"):
+        key = uuid_bytes(row["stored"])
+        if key is not None and key not in used:
+            free.append(key)
+    if len(free) != 1:
+        return
+    rid = next(iter(singles.values()))
+    conn.execute("UPDATE users SET identity_id = ? WHERE rowid = ?", (free[0], rid))
 
 
 def _drop_indexes_using(conn, table: str, column: str) -> None:
@@ -496,6 +765,98 @@ def _copy_record_account(conn, table: str, type_column: str, id_column: str) -> 
         )
 
 
+def _backfill_external_account_ids(conn) -> None:
+    """Give every account an integer slug.
+
+    A file from before external ids existed redirects to ``/None/`` after a
+    successful magic link, and that path is not an account. Numbers already
+    present stay where they are.
+    """
+    if not _has_table(conn, "accounts") or "external_account_id" not in _column_names(conn, "accounts"):
+        return
+    columns = _column_names(conn, "accounts")
+    order = "created_at, id" if "created_at" in columns else "id"
+    conn.execute("DROP TABLE IF EXISTS fizzy_external_ids")
+    conn.execute(
+        f"""
+        CREATE TEMP TABLE fizzy_external_ids AS
+        SELECT id,
+               COALESCE((SELECT MAX(external_account_id) FROM accounts), 0)
+               + ROW_NUMBER() OVER (ORDER BY {order}) AS external_account_id
+        FROM accounts
+        WHERE external_account_id IS NULL
+        """
+    )
+    conn.execute(
+        """
+        UPDATE accounts SET external_account_id = (
+            SELECT external_account_id FROM fizzy_external_ids
+            WHERE fizzy_external_ids.id = accounts.id
+        )
+        WHERE id IN (SELECT id FROM fizzy_external_ids)
+        """
+    )
+    conn.execute("DROP TABLE fizzy_external_ids")
+    if not _has_table(conn, "account_external_id_sequences"):
+        return
+    if "value" not in _column_names(conn, "account_external_id_sequences"):
+        return
+    maximum = int(
+        conn.execute("SELECT COALESCE(MAX(external_account_id), 0) AS value FROM accounts").fetchone()["value"]
+        or 0
+    )
+    existing = conn.execute("SELECT value AS current FROM account_external_id_sequences").fetchall()
+    if not existing:
+        count = int(conn.execute("SELECT COUNT(*) AS n FROM accounts").fetchone()["n"] or 0)
+        if not count:
+            return
+        sequence_columns = _column_names(conn, "account_external_id_sequences")
+        fields = ["value"]
+        params: list = [maximum]
+        if "id" in sequence_columns:
+            fields.insert(0, "id")
+            params.insert(0, uuid7_bytes())
+        now = dump_dt(utcnow())
+        if "created_at" in sequence_columns:
+            fields.extend(["created_at", "updated_at"])
+            params.extend([now, now])
+        quoted = ", ".join(f'"{field}"' for field in fields)
+        placeholders = ", ".join("?" for _ in fields)
+        conn.execute(
+            f"INSERT INTO account_external_id_sequences ({quoted}) VALUES ({placeholders})",
+            params,
+        )
+        return
+    current = max(int(row["current"] or 0) for row in existing)
+    if current < maximum:
+        conn.execute(
+            "UPDATE account_external_id_sequences SET value = ? WHERE value = ?",
+            (maximum, current),
+        )
+
+
+def _normalize_active_flags(conn) -> None:
+    """Store membership as 1 or 0 so later ``active = 1`` queries match.
+
+    NULL means the column was added without a value. Ruby's default is active.
+    """
+    if not _has_table(conn, "users") or "active" not in _column_names(conn, "users"):
+        return
+    conn.execute(
+        """
+        UPDATE users SET active = CASE
+            WHEN active IS NULL THEN 1
+            WHEN lower(CAST(active AS TEXT)) IN ('1', 't', 'true', 'yes') THEN 1
+            WHEN lower(CAST(active AS TEXT)) IN ('0', 'f', 'false', 'no') THEN 0
+            ELSE active
+        END
+        WHERE active IS NULL
+           OR typeof(active) != 'integer'
+           OR active NOT IN (0, 1)
+        """
+    )
+
+
 def _backfill_card_numbers(conn) -> None:
     """Give every card a positive number that is unique inside its account.
 
@@ -575,6 +936,8 @@ def _backfill_card_numbers(conn) -> None:
 
 def _backfill(conn) -> None:
     _backfill_account_ids(conn)
+    _backfill_external_account_ids(conn)
+    _normalize_active_flags(conn)
     _backfill_card_numbers(conn)
     if _has_table(conn, "identities") and "staff" in _column_names(conn, "identities"):
         conn.execute("UPDATE identities SET staff = 0 WHERE staff IS NULL")

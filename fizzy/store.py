@@ -19,11 +19,36 @@ from .constants import (
     STALLED_DAYS,
     WEBHOOK_ACTIONS,
 )
-from .db import delete_where, enc, insert, q, q1, update as write_row
+from .db import column_type, delete_where, enc, insert, q, q1, update as write_row
 from .errors import FizzyError, forbidden, invalid, not_found
 from .text import mention_ids_from_html, plain_text, to_html
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _active_sql(alias: str = "users") -> str:
+    """True for 1, NULL, and the 't'/'true' strings SQLite still stores.
+
+    ``users.active = 1`` is false for those strings, so a person who could
+    open the account in Ruby was left with no account after the magic link.
+    """
+    column = f"{alias}.active" if alias else "active"
+    return (
+        f"({column} = 1 OR {column} IS NULL "
+        f"OR lower(CAST({column} AS TEXT)) IN ('t', 'true', 'yes'))"
+    )
+
+
+def _text_limit(conn, table: str, column: str, default: int) -> int:
+    declared = column_type(conn, table, column)
+    match = re.search(r"\((\d+)\)", declared or "")
+    limit = int(match.group(1)) if match else default
+    row = q1(conn, "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,))
+    sql = (row or {}).get("sql") or ""
+    found = re.search(rf'length\(\s*"?{re.escape(column)}"?\s*\)\s*<=\s*(\d+)', sql)
+    if found:
+        limit = min(limit, int(found.group(1)))
+    return limit
 
 
 def _id(conn, table, column, value):
@@ -51,7 +76,11 @@ def update(conn, table, row_id, **cols):
 # --- identity, session, tokens ---------------------------------------------
 
 def identity_by_email(conn, email: str):
-    return q1(conn, "SELECT * FROM identities WHERE lower(email_address) = ?", (email.strip().lower(),))
+    return q1(
+        conn,
+        "SELECT * FROM identities WHERE lower(trim(email_address)) = ?",
+        (email.strip().lower(),),
+    )
 
 
 def identity_by_id(conn, identity_id: str):
@@ -87,12 +116,15 @@ def consume_magic_link(conn, link_id: str, code: str):
 
 
 def create_session(conn, identity_id: str, ip: str | None, user_agent: str | None):
+    # Ruby's original sessions.user_agent is varchar(255) with a length check.
+    # A current browser string is longer than that, and the insert then 500s
+    # after the code has already been accepted.
     session_id = insert(
         conn,
         "sessions",
         identity_id=identity_id,
-        ip_address=(ip or "")[:255],
-        user_agent=(user_agent or "")[:4096],
+        ip_address=(ip or "")[: _text_limit(conn, "sessions", "ip_address", 255)],
+        user_agent=(user_agent or "")[: _text_limit(conn, "sessions", "user_agent", 4096)],
     )
     return session_id
 
@@ -244,11 +276,11 @@ def signup(conn, email: str, full_name: str, account_name: str):
 def accounts_for_identity(conn, identity_id: str):
     return q(
         conn,
-        """
+        f"""
         SELECT accounts.*, users.id AS user_id
         FROM users
         JOIN accounts ON accounts.id = users.account_id
-        WHERE users.identity_id = ? AND users.active = 1
+        WHERE users.identity_id = ? AND {_active_sql("users")}
         ORDER BY accounts.created_at
         """,
         (_id(conn, "users", "identity_id", identity_id),),
@@ -266,11 +298,12 @@ def account_by_id(conn, account_id: str):
 def user_for_identity(conn, account_id: str, identity_id: str):
     return q1(
         conn,
-        """
+        f"""
         SELECT users.*, identities.email_address
         FROM users
         LEFT JOIN identities ON identities.id = users.identity_id
         WHERE users.account_id = ? AND users.identity_id = ?
+        ORDER BY CASE WHEN {_active_sql("users")} THEN 0 ELSE 1 END, users.created_at
         """,
         (_id(conn, "users", "account_id", account_id), _id(conn, "users", "identity_id", identity_id)),
     )
@@ -475,7 +508,7 @@ def deactivate_user(conn, actor: dict, user_id: str):
 def _owner_count(conn, account_id: str) -> int:
     row = q1(
         conn,
-        "SELECT COUNT(*) AS n FROM users WHERE account_id = ? AND role = 'owner' AND active = 1",
+        f"SELECT COUNT(*) AS n FROM users WHERE account_id = ? AND role = 'owner' AND {_active_sql('')}",
         (_id(conn, "users", "account_id", account_id),),
     )
     return int(row["n"])
@@ -1162,10 +1195,10 @@ def is_watching(conn, card_id: str, user_id: str) -> bool:
 def watchers(conn, card_id: str):
     return q(
         conn,
-        """
+        f"""
         SELECT users.* FROM watches
         JOIN users ON users.id = watches.user_id
-        WHERE watches.card_id = ? AND watches.watching = 1 AND users.active = 1
+        WHERE watches.card_id = ? AND watches.watching = 1 AND {_active_sql("users")}
         """,
         (_id(conn, "watches", "card_id", card_id),),
     )
@@ -1174,10 +1207,10 @@ def watchers(conn, card_id: str):
 def board_watchers(conn, board_id: str):
     return q(
         conn,
-        """
+        f"""
         SELECT users.* FROM accesses
         JOIN users ON users.id = accesses.user_id
-        WHERE accesses.board_id = ? AND accesses.involvement = 'watching' AND users.active = 1
+        WHERE accesses.board_id = ? AND accesses.involvement = 'watching' AND {_active_sql("users")}
         """,
         (_id(conn, "accesses", "board_id", board_id),),
     )

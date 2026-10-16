@@ -79,16 +79,44 @@ def is_fizzy_id(value: object) -> bool:
     return all(ch in BASE36 for ch in value)
 
 
+def uuid_bytes(value):
+    """16-byte id from a blob, a Fizzy base36 id, or a hex / dashed UUID.
+
+    Ruby's SQLite adapter writes ``blob(16)``. A dump, a ``uuid`` column, or a
+    membership id stored as text can hold the same value as hex or base36.
+    Comparing those forms in SQL never matches, so the membership fold used to
+    drop the only link between a user and their identity.
+    """
+    if isinstance(value, memoryview):
+        value = value.tobytes()
+    if isinstance(value, (bytes, bytearray)):
+        raw = bytes(value)
+        return raw if len(raw) == 16 else None
+    if not isinstance(value, str):
+        return None
+    text = value.strip().lower()
+    if is_fizzy_id(text):
+        return base36_to_bytes(text)
+    hexed = text.replace("-", "")
+    if len(hexed) == 32 and all(ch in "0123456789abcdef" for ch in hexed):
+        return bytes.fromhex(hexed)
+    return None
+
+
 def decode_uuid(value):
     if value is None:
         return None
     if isinstance(value, memoryview):
         value = value.tobytes()
-    if isinstance(value, bytes):
-        if len(value) == 16:
-            return bytes_to_base36(value)
-        return value
+    if isinstance(value, (bytes, bytearray)):
+        raw = bytes(value)
+        if len(raw) == 16:
+            return bytes_to_base36(raw)
+        return raw
     if isinstance(value, str):
+        converted = uuid_bytes(value)
+        if converted is not None:
+            return bytes_to_base36(converted)
         return value
     return value
 

@@ -233,7 +233,8 @@ def enter_account(slug: int):
     if not account:
         raise not_found("No account uses that address")
     user = store.user_for_identity(conn(), account["id"], g.identity["id"])
-    if not user or not user["active"]:
+    # NULL is an unset flag. Ruby's default is active, and 0 is the inactive one.
+    if not user or user["active"] is False:
         raise forbidden("You are not a member of this account")
     if g.permission == "read" and verb() not in {"GET", "HEAD"}:
         raise forbidden("This token is read-only")
@@ -305,7 +306,11 @@ def _iso(value):
 
 
 def _redirect_home():
-    accounts = store.accounts_for_identity(conn(), g.identity["id"])
+    accounts = [
+        row
+        for row in store.accounts_for_identity(conn(), g.identity["id"])
+        if isinstance(row.get("external_account_id"), int)
+    ]
     nxt = session.pop("next", None)
     if nxt and nxt.startswith(request.host_url):
         return redirect(nxt)

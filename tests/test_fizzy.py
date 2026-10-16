@@ -28,6 +28,50 @@ def _columns(conn, name: str) -> set[str]:
     return {row["name"] for row in conn.execute(f'PRAGMA table_info("{name}")')}
 
 
+def _dashed(raw: bytes) -> str:
+    text = raw.hex()
+    return f"{text[:8]}-{text[8:12]}-{text[12:16]}-{text[16:20]}-{text[20:]}"
+
+
+def _csrf(html: str) -> str:
+    match = re.search(r'name="csrf_token" value="([^"]+)"', html)
+    if match is None:
+        raise AssertionError(html[:800])
+    return match.group(1)
+
+
+def _login(client, email, user_agent=None):
+    headers = {"User-Agent": user_agent} if user_agent else {}
+    page = client.get("/login", headers=headers)
+    token = _csrf(page.get_data(as_text=True))
+    code_page = client.post(
+        "/login",
+        data={"csrf_token": token, "email_address": email},
+        headers=headers,
+    )
+    code_html = code_page.get_data(as_text=True)
+    match = re.search(r"Your code is ([0-9A-Z]+)", code_html)
+    if match is None:
+        raise AssertionError(code_html[:800])
+    token = _csrf(code_html)
+    return client.post(
+        "/login/code",
+        data={"csrf_token": token, "code": match.group(1)},
+        headers=headers,
+        follow_redirects=False,
+    )
+
+
+def _open_client(path: Path):
+    application = create_app({
+        "DATABASE": str(path),
+        "STORAGE": str(path.parent / "storage"),
+        "SECRET_KEY": "test-secret",
+        "TESTING": True,
+    })
+    return application.test_client()
+
+
 def app_in(directory: Path):
     database = directory / "fizzy.sqlite3"
     storage = directory / "storage"
@@ -961,6 +1005,404 @@ class SwapTests(unittest.TestCase):
             versions = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")}
             self.assertIn("20260121155752", versions)
             conn.close()
+
+
+class ExistingAccountLoginTests(unittest.TestCase):
+    def test_text_membership_ids_still_log_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fizzy.sqlite3"
+            account = b"\x21" * 16
+            other = b"\x29" * 16
+            # Letters in the hex keep a uuid column from storing the id as a number.
+            identity = bytes.fromhex("00112233445566778899aabbccddeeff")
+            membership = bytes.fromhex("ffeeddccbbaa99887766554433221100")
+            user = b"\x24" * 16
+            grace = b"\x25" * 16
+            orphan = b"\x26" * 16
+            system = b"\x27" * 16
+            now = "2026-01-01 00:00:00.000000"
+            later = "2026-02-01 00:00:00.000000"
+            raw = sqlite3.connect(path)
+            raw.executescript(
+                """
+                CREATE TABLE accounts (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    name varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE identities (
+                    id uuid PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    email_address varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE memberships (
+                    id varchar PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    identity_id varchar NOT NULL,
+                    tenant varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE users (
+                    id blob PRIMARY KEY NOT NULL,
+                    account_id blob,
+                    active boolean,
+                    created_at datetime NOT NULL,
+                    email_address varchar,
+                    membership_id varchar,
+                    name varchar NOT NULL,
+                    role varchar NOT NULL DEFAULT 'member',
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE sessions (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    identity_id blob NOT NULL,
+                    ip_address varchar(255),
+                    updated_at datetime NOT NULL,
+                    user_agent varchar(255) CHECK(length("user_agent") <= 255)
+                );
+                """
+            )
+            raw.execute(
+                "INSERT INTO accounts (id, created_at, name, updated_at) VALUES (?, ?, 'Home', ?)",
+                (account, now, now),
+            )
+            raw.execute(
+                "INSERT INTO accounts (id, created_at, name, updated_at) VALUES (?, ?, 'Lab', ?)",
+                (other, later, later),
+            )
+            raw.execute(
+                "INSERT INTO identities (id, created_at, email_address, updated_at) VALUES (?, ?, ' ada@example.com ', ?)",
+                (identity.hex(), now, now),
+            )
+            raw.execute(
+                "INSERT INTO memberships (id, created_at, identity_id, tenant, updated_at) VALUES (?, ?, ?, 'home', ?)",
+                (_dashed(membership), now, identity.hex(), now),
+            )
+            raw.execute(
+                """INSERT INTO users
+                   (id, account_id, active, created_at, membership_id, name, role, updated_at)
+                   VALUES (?, ?, 't', ?, ?, 'Ada', 'admin', ?)""",
+                (user, account, now, membership.hex(), now),
+            )
+            raw.execute(
+                """INSERT INTO users
+                   (id, account_id, active, created_at, email_address, name, role, updated_at)
+                   VALUES (?, ?, 1, ?, 'grace@example.com', 'Grace', 'member', ?)""",
+                (grace, other, later, later),
+            )
+            raw.execute(
+                """INSERT INTO users
+                   (id, account_id, active, created_at, membership_id, name, role, updated_at)
+                   VALUES (?, ?, 1, ?, ?, 'Orphan', 'member', ?)""",
+                (orphan, account, now, b"\xff" * 16, now),
+            )
+            raw.execute(
+                """INSERT INTO users
+                   (id, account_id, active, created_at, name, role, updated_at)
+                   VALUES (?, ?, 1, ?, 'System', 'system', ?)""",
+                (system, account, now, now),
+            )
+            raw.commit()
+            raw.close()
+
+            client = _open_client(path)
+            landed = _login(client, "ada@example.com", user_agent="Browser" * 80)
+            self.assertEqual(landed.status_code, 302, landed.get_data(as_text=True))
+            self.assertIn("/1/", landed.location)
+            home = client.get(landed.location)
+            self.assertEqual(home.status_code, 200, home.get_data(as_text=True))
+            self.assertIn("Latest Activity", home.get_data(as_text=True))
+
+            check = sqlite3.connect(path)
+            check.row_factory = sqlite3.Row
+            ada = check.execute("SELECT identity_id, active FROM users WHERE name = 'Ada'").fetchone()
+            self.assertEqual(bytes(ada["identity_id"]), identity)
+            self.assertEqual(ada["active"], 1)
+            self.assertEqual(
+                check.execute("SELECT external_account_id FROM accounts WHERE name = 'Home'").fetchone()["external_account_id"],
+                1,
+            )
+            self.assertEqual(
+                check.execute(
+                    "SELECT email_address FROM identities WHERE lower(trim(email_address)) = 'grace@example.com'"
+                ).fetchone()["email_address"],
+                "grace@example.com",
+            )
+            self.assertIsNone(check.execute("SELECT identity_id FROM users WHERE name = 'Orphan'").fetchone()["identity_id"])
+            self.assertIsNone(check.execute("SELECT identity_id FROM users WHERE name = 'System'").fetchone()["identity_id"])
+            self.assertIsNotNone(
+                check.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memberships'").fetchone()
+            )
+            stored_agent = check.execute("SELECT user_agent FROM sessions").fetchone()["user_agent"]
+            self.assertLessEqual(len(stored_agent), 255)
+            check.close()
+
+            again = connect(path)
+            self.assertEqual(again.execute("SELECT identity_id FROM users WHERE name = 'Ada'").fetchone()["identity_id"], bytes_to_base36(identity))
+            again.close()
+
+    def test_null_active_and_missing_slug_still_log_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fizzy.sqlite3"
+            account = b"\x41" * 16
+            identity = b"\x42" * 16
+            user = b"\x43" * 16
+            now = "2026-03-01 00:00:00.000000"
+            raw = sqlite3.connect(path)
+            raw.executescript(
+                """
+                CREATE TABLE accounts (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    name varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE identities (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    email_address varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE users (
+                    id blob PRIMARY KEY NOT NULL,
+                    account_id blob,
+                    active boolean,
+                    created_at datetime NOT NULL,
+                    identity_id blob,
+                    name varchar NOT NULL,
+                    role varchar NOT NULL DEFAULT 'member',
+                    updated_at datetime NOT NULL
+                );
+                """
+            )
+            raw.execute(
+                "INSERT INTO accounts (id, created_at, name, updated_at) VALUES (?, ?, 'Desk', ?)",
+                (account, now, now),
+            )
+            raw.execute(
+                "INSERT INTO identities (id, created_at, email_address, updated_at) VALUES (?, ?, 'ada@example.com', ?)",
+                (identity, now, now),
+            )
+            raw.execute(
+                """INSERT INTO users
+                   (id, account_id, active, created_at, identity_id, name, role, updated_at)
+                   VALUES (?, ?, NULL, ?, ?, 'Ada', 'owner', ?)""",
+                (user, account, now, identity, now),
+            )
+            raw.commit()
+            raw.close()
+
+            client = _open_client(path)
+            landed = _login(client, "ada@example.com")
+            self.assertEqual(landed.status_code, 302, landed.get_data(as_text=True))
+            self.assertIn("/1/", landed.location)
+            home = client.get("/1/")
+            self.assertEqual(home.status_code, 200, home.get_data(as_text=True))
+            self.assertIn("Latest Activity", home.get_data(as_text=True))
+
+            check = sqlite3.connect(path)
+            check.row_factory = sqlite3.Row
+            row = check.execute(
+                """
+                SELECT users.identity_id, users.active, identities.email_address, accounts.external_account_id
+                FROM users
+                JOIN identities ON identities.id = users.identity_id
+                JOIN accounts ON accounts.id = users.account_id
+                WHERE users.name = 'Ada'
+                """
+            ).fetchone()
+            self.assertEqual(bytes(row["identity_id"]), identity)
+            self.assertEqual(row["active"], 1)
+            self.assertEqual(row["email_address"], "ada@example.com")
+            self.assertEqual(row["external_account_id"], 1)
+            check.close()
+
+            connect(path).close()
+            check = sqlite3.connect(path)
+            check.row_factory = sqlite3.Row
+            again = check.execute(
+                "SELECT identity_id, active FROM users WHERE name = 'Ada'"
+            ).fetchone()
+            slug = check.execute("SELECT external_account_id FROM accounts").fetchone()["external_account_id"]
+            email = check.execute("SELECT email_address FROM identities").fetchone()["email_address"]
+            self.assertEqual(bytes(again["identity_id"]), identity)
+            self.assertEqual(again["active"], 1)
+            self.assertEqual(slug, 1)
+            self.assertEqual(email, "ada@example.com")
+            check.close()
+
+    def test_one_unlinked_person_logs_into_the_only_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fizzy.sqlite3"
+            account = b"\x51" * 16
+            identity = b"\x52" * 16
+            user = b"\x53" * 16
+            now = "2026-04-01 00:00:00.000000"
+            raw = sqlite3.connect(path)
+            raw.executescript(
+                """
+                CREATE TABLE accounts (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    name varchar NOT NULL,
+                    external_account_id bigint,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE identities (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    email_address varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE users (
+                    id blob PRIMARY KEY NOT NULL,
+                    account_id blob,
+                    active boolean NOT NULL DEFAULT 1,
+                    created_at datetime NOT NULL,
+                    identity_id blob,
+                    name varchar NOT NULL,
+                    role varchar NOT NULL DEFAULT 'member',
+                    updated_at datetime NOT NULL
+                );
+                """
+            )
+            raw.execute(
+                "INSERT INTO accounts (id, created_at, name, external_account_id, updated_at) VALUES (?, ?, 'Home', 4, ?)",
+                (account, now, now),
+            )
+            raw.execute(
+                "INSERT INTO identities (id, created_at, email_address, updated_at) VALUES (?, ?, 'ada@example.com', ?)",
+                (identity, now, now),
+            )
+            raw.execute(
+                """INSERT INTO users
+                   (id, account_id, active, created_at, name, role, updated_at)
+                   VALUES (?, ?, 't', ?, 'Ada', 'owner', ?)""",
+                (user, account, now, now),
+            )
+            raw.commit()
+            raw.close()
+
+            client = _open_client(path)
+            landed = _login(client, "ada@example.com")
+            self.assertEqual(landed.status_code, 302, landed.get_data(as_text=True))
+            self.assertIn("/4/", landed.location)
+            home = client.get("/4/")
+            self.assertEqual(home.status_code, 200, home.get_data(as_text=True))
+            check = sqlite3.connect(path)
+            self.assertEqual(check.execute("SELECT identity_id FROM users").fetchone()[0], identity)
+            self.assertEqual(check.execute("SELECT active FROM users").fetchone()[0], 1)
+            check.close()
+
+    def test_several_unlinked_accounts_are_not_guessed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fizzy.sqlite3"
+            now = "2026-05-01 00:00:00.000000"
+            raw = sqlite3.connect(path)
+            raw.executescript(
+                """
+                CREATE TABLE accounts (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    name varchar NOT NULL,
+                    external_account_id bigint,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE identities (
+                    id blob PRIMARY KEY NOT NULL,
+                    created_at datetime NOT NULL,
+                    email_address varchar NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                CREATE TABLE users (
+                    id blob PRIMARY KEY NOT NULL,
+                    account_id blob,
+                    active boolean NOT NULL DEFAULT 1,
+                    created_at datetime NOT NULL,
+                    identity_id blob,
+                    name varchar NOT NULL,
+                    role varchar NOT NULL DEFAULT 'member',
+                    updated_at datetime NOT NULL
+                );
+                """
+            )
+            for index in range(2):
+                raw.execute(
+                    "INSERT INTO accounts (id, created_at, name, external_account_id, updated_at) VALUES (?, ?, ?, ?, ?)",
+                    (bytes([index + 1]) * 16, now, f"Account {index}", index + 1, now),
+                )
+                raw.execute(
+                    "INSERT INTO identities (id, created_at, email_address, updated_at) VALUES (?, ?, ?, ?)",
+                    (bytes([index + 10]) * 16, now, f"person{index}@example.com", now),
+                )
+                raw.execute(
+                    """INSERT INTO users
+                       (id, account_id, active, created_at, name, role, updated_at)
+                       VALUES (?, ?, 1, ?, ?, 'owner', ?)""",
+                    (bytes([index + 20]) * 16, bytes([index + 1]) * 16, now, f"Person {index}", now),
+                )
+            raw.commit()
+            raw.close()
+
+            conn = connect(path)
+            linked = conn.execute("SELECT COUNT(*) AS n FROM users WHERE identity_id IS NOT NULL").fetchone()["n"]
+            self.assertEqual(linked, 0)
+            self.assertEqual(
+                {row["external_account_id"] for row in conn.execute("SELECT external_account_id FROM accounts")},
+                {1, 2},
+            )
+            conn.close()
+
+    def test_current_account_stays_linked_across_opens(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            client = app_in(root).test_client()
+            signed = client.post(
+                "/signup",
+                json={"signup": {"email_address": "ada@example.com", "full_name": "Ada Lovelace", "account_name": "Home"}},
+                headers={"Accept": "application/json"},
+            )
+            self.assertEqual(signed.status_code, 201, signed.get_data(as_text=True))
+            slug = signed.get_json()["slug"]
+            path = root / "fizzy.sqlite3"
+
+            def snapshot():
+                check = sqlite3.connect(path)
+                check.row_factory = sqlite3.Row
+                row = check.execute(
+                    """
+                    SELECT users.identity_id, users.active, identities.email_address, accounts.external_account_id
+                    FROM users
+                    JOIN identities ON identities.id = users.identity_id
+                    JOIN accounts ON accounts.id = users.account_id
+                    WHERE users.role = 'owner'
+                    """
+                ).fetchone()
+                values = (
+                    bytes(row["identity_id"]),
+                    row["active"],
+                    row["email_address"],
+                    row["external_account_id"],
+                )
+                check.close()
+                return values
+
+            before = snapshot()
+            connect(path).close()
+            self.assertEqual(snapshot(), before)
+            page = client.get(f"{slug}/")
+            token = _csrf(page.get_data(as_text=True))
+            client.post("/logout", data={"csrf_token": token, "_method": "delete"})
+            landed = _login(client, "ada@example.com")
+            self.assertEqual(landed.status_code, 302, landed.get_data(as_text=True))
+            self.assertIn(f"{slug}/", landed.location)
+            home = client.get(landed.location)
+            self.assertEqual(home.status_code, 200, home.get_data(as_text=True))
+            self.assertIn("Latest Activity", home.get_data(as_text=True))
+            self.assertEqual(snapshot(), before)
 
 
 if __name__ == "__main__":
