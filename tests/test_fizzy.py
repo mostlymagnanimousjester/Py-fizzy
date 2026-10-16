@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fizzy import create_app
 from fizzy.codec import base36_to_bytes, bytes_to_base36, uuid7_bytes
+from fizzy import store
 from fizzy.db import connect
 
 SAMPLE = "01jcqzx8h0000000000000000"
@@ -415,6 +416,75 @@ class SwapTests(unittest.TestCase):
             )
             self.assertEqual(listed.status_code, 200, listed.get_data(as_text=True))
             self.assertEqual(json.loads(listed.get_data(as_text=True))[0]["number"], 7)
+
+    def test_older_reactions_table_still_opens_a_board(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            application = app_in(root)
+            client = application.test_client()
+            signed = client.post(
+                "/signup",
+                json={"signup": {"email_address": "ada@example.com", "full_name": "Ada Lovelace", "account_name": "Home"}},
+                headers={"Accept": "application/json"},
+            )
+            self.assertEqual(signed.status_code, 201, signed.get_data(as_text=True))
+            slug = signed.get_json()["slug"]
+            token = client.post(
+                "/my/access_tokens",
+                json={"access_token": {"description": "script", "permission": "write"}},
+                headers={"Accept": "application/json"},
+            ).get_json()["token"]
+            headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+            board = client.post(f"{slug}/boards.json", json={"board": {"name": "Product"}}, headers=headers)
+            board_id = board.get_json()["id"]
+            card = client.post(
+                f"{slug}/boards/{board_id}/cards.json",
+                json={"card": {"title": "Ship the port"}},
+                headers=headers,
+            )
+            number = card.get_json()["number"]
+            comment = client.post(
+                f"{slug}/cards/{number}/comments.json",
+                json={"comment": {"body": "Looking good"}},
+                headers=headers,
+            )
+            comment_id = comment.get_json()["id"]
+            user_id = client.get(f"{slug}/users.json", headers=headers).get_json()[0]["id"]
+
+            raw = sqlite3.connect(root / "fizzy.sqlite3")
+            raw.execute("DROP TABLE reactions")
+            raw.execute(
+                """
+                CREATE TABLE reactions (
+                    id blob PRIMARY KEY NOT NULL,
+                    comment_id blob NOT NULL,
+                    content varchar(16) NOT NULL,
+                    created_at datetime NOT NULL,
+                    reacter_id blob NOT NULL,
+                    updated_at datetime NOT NULL
+                )
+                """
+            )
+            now = "2026-02-03 04:05:06.123456"
+            raw.execute(
+                "INSERT INTO reactions (id, comment_id, content, created_at, reacter_id, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (uuid7_bytes(), base36_to_bytes(comment_id), "Yes", now, base36_to_bytes(user_id), now),
+            )
+            raw.commit()
+            raw.close()
+
+            page = client.get(
+                f"{slug}/boards/{board_id}",
+                headers={"Authorization": f"Bearer {token}", "Accept": "text/html"},
+            )
+            self.assertEqual(page.status_code, 200, page.get_data(as_text=True))
+            self.assertIn("Ship the port", page.get_data(as_text=True))
+
+            conn = connect(root / "fizzy.sqlite3")
+            found = store.reactions_of(conn, "Comment", comment_id)
+            self.assertEqual([row["content"] for row in found], ["Yes"])
+            self.assertEqual(store.reactions_of(conn, "Card", card.get_json()["id"]), [])
+            conn.close()
 
 
 if __name__ == "__main__":
