@@ -19,7 +19,7 @@
         <button type="button" class="nav__trigger input input--select center flex-inline align-center txt-normal" data-hotkey="jump" aria-haspopup="dialog" aria-controls="jump">
           <span><img src="{{ url_for('static', filename='vendor/logo.png') }}" alt=""></span>
           <img class="wordmark" src="{{ url_for('static', filename='vendor/wordmark.svg') }}" alt="Fizzy">
-          <kbd class="kbd txt-xx-small">J</kbd>
+          <kbd class="kbd txt-xx-small">␣␣</kbd>
         </button>
         <dialog id="jump" class="nav__menu filter popup popup--animated panel margin-block-start">
           <div class="flex gap">
@@ -78,7 +78,7 @@
                 <li class="popup__item"><a class="popup__btn btn" href="/accounts">Switch account</a></li>
               </ul>
             </nav>
-            <p class="txt-x-small translucent">J menu · K search · P pins · N inbox · arrows move · [ Not Now · ] Done · M me</p>
+            <p class="txt-x-small translucent">␣␣ jump · / search · hjkl move · dd done · dn not now · ? keys</p>
           </div>
           <form method="post" action="/logout">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -111,7 +111,7 @@
     <div id="footer_frames">
       <div class="bar full-width">
         <div class="flex justify-center bar__placeholder">
-          <button type="button" class="btn btn--plain" data-hotkey="k"><span>Search <kbd class="kbd">K</kbd></span></button>
+          <button type="button" class="btn btn--plain" data-hotkey="k"><span>Search <kbd class="kbd">/</kbd></span></button>
         </div>
         <div class="bar__input" hidden>
           <form class="search" action="{{ slug }}/search" method="get">
@@ -133,7 +133,7 @@
         <button type="button" class="tray__toggle" data-hotkey="p" aria-controls="pins-tray" aria-label="Toggle pins stack">
           <div class="tray__toggle-btn txt-uppercase btn btn--reversed txt-x-small center full-width">
             <span class="icon icon--pinned"></span>
-            <span class="tray__toggle-text">Pinned <kbd class="kbd">P</kbd></span>
+            <span class="tray__toggle-text">Pinned <kbd class="kbd">␣p</kbd></span>
           </div>
         </button>
       </section>
@@ -159,13 +159,24 @@
         <button type="button" class="tray__toggle" data-hotkey="n" aria-controls="notes-tray" aria-label="Toggle notifications stack">
           <div class="tray__toggle-btn txt-uppercase btn btn--reversed txt-x-small center full-width">
             <span class="icon icon--bell"></span>
-            <span class="tray__toggle-text">Notifications <kbd class="kbd">N</kbd></span>
+            <span class="tray__toggle-text">Notifications <kbd class="kbd">␣n</kbd></span>
             {% if unread %}<span class="count">{{ unread }}</span>{% endif %}
           </div>
         </button>
       </section>
     </div>
   </footer>
+  {% endif %}
+  {% if current_user %}
+  <dialog id="keymap" class="popup panel">
+    <div class="flex justify-space-between align-center gap margin-block-end">
+      <strong>Keys</strong>
+      <form method="dialog">
+        <button class="btn txt-xx-small" value="cancel" aria-label="Close keys">Close</button>
+      </form>
+    </div>
+    <div data-keymap></div>
+  </dialog>
   {% endif %}
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

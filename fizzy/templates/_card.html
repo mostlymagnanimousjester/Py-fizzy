@@ -5,7 +5,13 @@
   data-number="{{ view.card.number }}"
   {% if current_user and not view.closed %}data-closure-url="{{ slug }}/cards/{{ view.card.number }}/closure"{% endif %}
   {% if current_user and not view.postponed and not view.closed %}data-not-now-url="{{ slug }}/cards/{{ view.card.number }}/not_now"{% endif %}
-  {% if current_user %}data-assign-url="{{ slug }}/cards/{{ view.card.number }}/self_assignment"{% endif %}>
+  {% if current_user %}data-assign-url="{{ slug }}/cards/{{ view.card.number }}/self_assignment"{% endif %}
+  {% if current_user %}data-gold-url="{{ slug }}/cards/{{ view.card.number }}/goldness"{% endif %}
+  {% if current_user and view.golden %}data-gold{% endif %}
+  {% if current_user %}data-pin-url="{{ slug }}/cards/{{ view.card.number }}/pin"{% endif %}
+  {% if current_user and view.pinned %}data-pinned{% endif %}
+  {% if current_user %}data-watch-url="{{ slug }}/cards/{{ view.card.number }}/watch"{% endif %}
+  {% if current_user and view.watching %}data-watching{% endif %}>
   <div class="flex flex-column flex-item-grow max-inline-size">
     <a class="card__link" tabindex="-1" href="{% if public_key %}{{ slug }}/public/boards/{{ public_key }}/cards/{{ view.card.number }}{% else %}{{ slug }}/cards/{{ view.card.number }}{% endif %}" draggable="false">
       <span class="for-screen-reader">{{ view.card.title or "Untitled" }}</span>

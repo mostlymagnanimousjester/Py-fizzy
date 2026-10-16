@@ -7,7 +7,7 @@
       <button type="submit" class="btn btn--circle{% if view.golden %} card-perma__star-input{% endif %}" data-hotkey="gold" title="Golden ticket">
         <span class="icon icon--golden-ticket"></span>
         <span class="for-screen-reader">Gold</span>
-        <kbd>G</kbd>
+        <kbd>␣g</kbd>
       </button>
     </form>
     {% endif %}
@@ -57,7 +57,7 @@
             <dialog class="popup panel flex-column align-start justify-start fill-white shadow txt-small">
               <div class="flex align-start justify-space-between">
                 <strong class="popup__title">Tag this…</strong>
-                <kbd class="txt-xx-small hide-on-touch">t</kbd>
+                <kbd class="txt-xx-small hide-on-touch">␣t</kbd>
               </div>
               <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/taggings" id="card-tags-form" class="flex flex-column gap-half full-width margin-block-half">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -204,7 +204,7 @@
               <dialog class="popup panel flex-column align-start gap-half fill-white shadow">
                 <div class="flex align-start justify-space-between">
                   <strong class="popup__title">Assign this to…</strong>
-                  <kbd class="txt-xx-small hide-on-touch">a</kbd>
+                  <kbd class="txt-xx-small hide-on-touch">␣a</kbd>
                 </div>
                 <input type="search" class="input input--transparent txt-small margin-block-half" placeholder="Filter…" autocomplete="off" autocorrect="off" aria-label="Filter people" data-hotkey-target="assign" data-popup-filter>
                 <ul class="popup__list">
@@ -214,7 +214,7 @@
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <button type="submit" class="popup__btn btn">
                         <span class="overflow-ellipsis flex-item-grow">Me</span>
-                        <kbd class="txt-xx-small hide-on-touch">m</kbd>
+                        <kbd class="txt-xx-small hide-on-touch">␣m</kbd>
                         <span class="icon icon--check checked flex-item-no-shrink flex-item-justify-end"></span>
                       </button>
                     </form>
@@ -296,14 +296,14 @@
       <button type="button" class="btn btn--circle-mobile borderless" data-card-edit data-hotkey="edit">
         <span class="icon icon--pencil icon--mobile-only"></span>
         <span>Edit</span>
-        <kbd class="txt-x-small hide-on-touch">e</kbd>
+        <kbd class="txt-x-small hide-on-touch">i</kbd>
       </button>
       <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/closure">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button type="submit" class="btn btn--circle-mobile borderless" data-hotkey="done">
           <span class="icon icon--check icon--mobile-only"></span>
           <span class="overflow-ellipsis">Mark as Done</span>
-          <kbd class="txt-x-small hide-on-touch">d</kbd>
+          <kbd class="txt-x-small hide-on-touch">dd</kbd>
         </button>
       </form>
     </div>

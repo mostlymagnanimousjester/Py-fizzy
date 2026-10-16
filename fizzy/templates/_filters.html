@@ -47,7 +47,7 @@
       {% endfor %}
       {% endif %}
 
-      <input class="filter__terms input txt-x-small" name="terms[]" placeholder="Filter these cards… [F]" autocomplete="off" autocorrect="off" aria-label="Filter these cards" data-hotkey-target="filter" value="">
+      <input class="filter__terms input txt-x-small" name="terms[]" placeholder="Filter these cards… [Space f]" autocomplete="off" autocorrect="off" aria-label="Filter these cards" data-hotkey-target="filter" value="">
       {% for term in filters.terms %}
       <button type="button" class="btn txt-x-small btn--remove fill-selected flex-inline" data-filter-remove="terms" data-filter-value="{{ term }}">
         <span>“{{ term }}”</span>

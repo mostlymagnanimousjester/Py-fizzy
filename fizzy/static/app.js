@@ -156,48 +156,57 @@
     return document.querySelector("section.cards.is-expanded");
   }
 
+  function gridElement() {
+    if (boardRoot()) return null;
+    return document.querySelector(".cards-grid, .card-grid, .cards--grid");
+  }
+
+  function listedCards() {
+    if (boardRoot()) return visibleCards(activeColumn());
+    const grid = gridElement();
+    return grid ? Array.from(grid.querySelectorAll("article.card")) : [];
+  }
+
   function moveColumn(direction) {
     const list = columns();
-    if (!list.length) return;
+    if (!list.length) return false;
+    const sign = direction < 0 ? -1 : 1;
+    const steps = Math.max(1, Math.abs(direction));
     const current = activeColumn() || list[0];
+    const from = visibleCards(current);
+    const selected = selectedCard();
+    let cardIndex = from.indexOf(selected);
+    if (cardIndex < 0) cardIndex = 0;
     const index = Math.max(0, list.indexOf(current));
-    const next = list[index + direction];
-    if (!next) return;
-    if (next.classList.contains("is-collapsed")) showColumn(next);
+    const destIndex = Math.max(0, Math.min(list.length - 1, index + sign * steps));
+    if (destIndex === index) return false;
+    const dest = list[destIndex];
+    if (dest.classList.contains("is-collapsed")) showColumn(dest, { select: false });
+    const cards = visibleCards(dest);
+    if (cards.length) selectCard(cards[Math.min(cardIndex, cards.length - 1)]);
     else {
-      const cards = visibleCards(next);
-      if (cards.length) selectCard(cards[0]);
-      else {
-        selectCard(null);
-        next.focus();
-      }
+      selectCard(null);
+      dest.focus();
     }
+    return true;
   }
 
   function moveCard(direction) {
-    const column = activeColumn();
-    const cards = visibleCards(column);
-    if (!cards.length) {
-      moveGrid(direction);
-      return;
-    }
+    const cards = listedCards();
+    if (!cards.length) return false;
+    const sign = direction < 0 ? -1 : 1;
+    const steps = Math.max(1, Math.abs(direction));
     const current = selectedCard();
     let index = cards.indexOf(current);
-    if (index < 0) index = direction > 0 ? -1 : cards.length;
-    const next = cards[index + direction];
-    if (next) selectCard(next);
+    if (index < 0) index = sign > 0 ? -1 : cards.length;
+    const dest = Math.max(0, Math.min(cards.length - 1, index + sign * steps));
+    if (cards[dest] === current) return false;
+    selectCard(cards[dest]);
+    return true;
   }
 
   function moveGrid(direction) {
-    const grid = document.querySelector(".cards-grid, .card-grid");
-    if (!grid) return;
-    const cards = Array.from(grid.querySelectorAll("article.card"));
-    if (!cards.length) return;
-    const current = selectedCard();
-    let index = cards.indexOf(current);
-    if (index < 0) index = direction > 0 ? -1 : cards.length;
-    const next = cards[index + direction];
-    if (next) selectCard(next);
+    return moveCard(direction);
   }
 
   function recount(column) {
@@ -269,6 +278,15 @@
     (root || document).querySelectorAll(".bubble").forEach(paintBubble);
   }
 
+  let holdSelection = false;
+
+  function laneColumn(lane) {
+    if (!lane) return null;
+    return document.getElementById("column-" + lane)
+      || document.getElementById("lane-" + lane)
+      || document.querySelector('section.cards[data-lane="' + lane + '"]');
+  }
+
   function placeCard(payload) {
     const template = document.createElement("template");
     template.innerHTML = (payload.html || "").trim();
@@ -284,7 +302,7 @@
       if (neighbor && !neighbor.matches("article.card")) neighbor = null;
       current.replaceWith(fresh);
     }
-    const target = document.getElementById("lane-" + payload.lane) || document.getElementById("column-" + payload.lane);
+    const target = laneColumn(payload.lane);
     const list = target && target.querySelector(".cards__list");
     if (list && !list.contains(fresh)) {
       if (fresh.classList.contains("golden-effect")) list.prepend(fresh);
@@ -293,13 +311,24 @@
     recount(sourceColumn);
     recount(target);
     paintBubble(fresh.querySelector(".bubble"));
+    if (holdSelection) return;
     if (payload.stay) {
       selectCard(fresh);
       return;
     }
     const home = neighbor && neighbor.closest("section.cards");
     if (neighbor && neighbor.isConnected && home && visibleCards(home).indexOf(neighbor) >= 0) selectCard(neighbor);
-    else if (neighbor && neighbor.isConnected && neighbor.closest(".cards-grid, .card-grid")) selectCard(neighbor);
+    else if (neighbor && neighbor.isConnected && neighbor.closest(".cards-grid, .card-grid, .cards--grid")) selectCard(neighbor);
+    else chooseFallback();
+  }
+
+  function chooseFallback() {
+    if (boardRoot()) {
+      selectFirstMaybe();
+      return;
+    }
+    const cards = listedCards();
+    if (cards.length) selectCard(cards[0]);
     else selectCard(null);
   }
 
@@ -312,7 +341,7 @@
       });
     }
     const headers = {};
-    if (boardRoot() || document.querySelector(".cards-grid")) headers["X-Fizzy-Fragment"] = "card";
+    if (boardRoot() || document.querySelector(".cards-grid, .card-grid, .cards--grid")) headers["X-Fizzy-Fragment"] = "card";
     return fetch(url, { method: "POST", body: body, credentials: "same-origin", headers: headers }).then(function (response) {
       if (!response.ok) {
         window.alert("Could not update that card.");
@@ -480,6 +509,8 @@
   if (boardRoot()) {
     restoreColumns();
     desktopQuery.addEventListener("change", restoreColumns);
+  } else {
+    chooseFallback();
   }
 
   function setCardEditing(on) {
@@ -723,7 +754,9 @@
   if (barInput && barInput.value) openSearch();
 
   let searchGeneration = 0;
+  let lastSearchCards = null;
   function renderSearch(cards) {
+    lastSearchCards = cards || [];
     if (!barResults) return;
     if (!cards.length) {
       barResults.innerHTML = '<p class="blank-slate">No matches.</p>';
@@ -787,6 +820,7 @@
       if (!stage) return;
       stage.innerHTML = html;
       if (boardRoot()) restoreColumns();
+      else chooseFallback();
       paintBubbles(stage);
     });
   }
@@ -877,6 +911,7 @@
     if (!stage) return;
     stage.innerHTML = html;
     if (boardRoot()) restoreColumns();
+    else chooseFallback();
     paintBubbles(stage);
   }
 
@@ -1025,6 +1060,282 @@
     });
   });
 
+  const KEYMAP = [
+    ["h j k l", "Previous column, next card, previous card, next column. Arrows do the same."],
+    ["gg", "First card in this column."],
+    ["G", "Last card. 3G is the third card."],
+    ["Enter", "Open the selected card."],
+    ["f char", "Next card whose title starts with that letter, or contains it."],
+    ["F char", "Same search, upward."],
+    ["; ,", "Repeat the last f or F forward or backward."],
+    ["dd", "Done. 3dd closes this card and the two below it."],
+    ["dn", "Not now. Same count as dd."],
+    [".", "Repeat the last dd or dn on the selected card."],
+    ["o", "Add a card in Maybe."],
+    ["i", "Edit the title. From a board, open the card first."],
+    ["/", "Search."],
+    ["n N", "Next or previous search hit."],
+    ["Space Space", "Jump menu. Then 1 Home, 2 Assigned to me, 3 Added by me."],
+    ["Space p", "Pins."],
+    ["Space P", "Pin or unpin the selected card."],
+    ["Space n", "Notifications."],
+    ["Space f", "Filter."],
+    ["Space m", "Assign to me."],
+    ["Space g", "Toggle golden."],
+    ["Space w", "Toggle watch."],
+    ["Space t", "Tags on the open card."],
+    ["Space a", "Assignees on the open card."],
+    ["?", "This list."]
+  ];
+
+  let pending = null;
+  let count = 0;
+  let lastFind = null;
+  let lastChange = null;
+
+  function fillKeymap() {
+    const host = document.querySelector("[data-keymap]");
+    if (!host || host.dataset.filled) return;
+    host.dataset.filled = "1";
+    host.innerHTML = KEYMAP.map(function (row) {
+      return '<p class="txt-small"><kbd>' + escapeHtml(row[0]) + "</kbd> " + escapeHtml(row[1]) + "</p>";
+    }).join("");
+  }
+
+  function showKeymap() {
+    fillKeymap();
+    const dialog = dialogById("keymap");
+    if (!dialog) return;
+    if (dialog.open) {
+      dialog.close();
+      return;
+    }
+    document.querySelectorAll("dialog[open]").forEach(function (open) { open.close(); });
+    dialog.showModal();
+  }
+
+  function takeCount() {
+    const steps = count || 1;
+    count = 0;
+    return steps;
+  }
+
+  function dropCount() {
+    count = 0;
+  }
+
+  function onCardPage() {
+    return !!document.getElementById("card-sheet") && !columns().length;
+  }
+
+  function goBack() {
+    const back = document.querySelector("[data-back]");
+    if (back) back.click();
+  }
+
+  function cardTitle(card) {
+    const node = card.querySelector(".card__title");
+    return (node ? node.textContent : "").trim().toLowerCase();
+  }
+
+  function findCard(char, direction) {
+    const cards = listedCards();
+    if (!cards.length || !char) return;
+    const needle = String(char).toLowerCase();
+    const current = selectedCard();
+    let start = cards.indexOf(current);
+    if (start < 0) start = direction > 0 ? -1 : cards.length;
+    const step = direction > 0 ? 1 : -1;
+    function scan(test) {
+      for (let index = start + step; index >= 0 && index < cards.length; index += step) {
+        if (test(cardTitle(cards[index]))) {
+          selectCard(cards[index]);
+          return true;
+        }
+      }
+      return false;
+    }
+    scan(function (title) { return title.charAt(0) === needle; })
+      || scan(function (title) { return title.indexOf(needle) !== -1; });
+  }
+
+  function goEnds(which) {
+    const cards = listedCards();
+    if (!cards.length) return;
+    if (which === "first") {
+      selectCard(cards[0]);
+      return;
+    }
+    if (count) {
+      const index = Math.min(cards.length, count) - 1;
+      dropCount();
+      selectCard(cards[Math.max(0, index)]);
+      return;
+    }
+    selectCard(cards[cards.length - 1]);
+  }
+
+  function runLineAction(kind, times) {
+    lastChange = kind;
+    if (onCardPage()) {
+      clickHotkey(kind === "done" ? "done" : "postpone");
+      return;
+    }
+    const cards = listedCards();
+    const current = selectedCard();
+    const index = cards.indexOf(current);
+    if (index < 0) return;
+    const take = Math.max(1, times || 1);
+    const slice = cards.slice(index, index + take);
+    const successor = cards[index + take] || cards[index - 1] || null;
+    const jobs = [];
+    slice.forEach(function (card) {
+      const url = kind === "done" ? card.dataset.closureUrl : card.dataset.notNowUrl;
+      if (url) jobs.push(url);
+    });
+    if (!jobs.length) return;
+    holdSelection = true;
+    let chain = Promise.resolve();
+    jobs.forEach(function (url) {
+      chain = chain.then(function () { return post(url); });
+    });
+    chain.then(function () {
+      holdSelection = false;
+      const column = successor && successor.closest("section.cards");
+      if (successor && successor.isConnected && (!column || !column.classList.contains("is-collapsed"))) selectCard(successor);
+      else chooseFallback();
+    }, function () {
+      holdSelection = false;
+      chooseFallback();
+    });
+  }
+
+  function toggleFlag(hotkey, urlKey, flag) {
+    if (document.getElementById("card-sheet") && clickHotkey(hotkey)) return;
+    const card = selectedCard();
+    if (!card) return;
+    const url = card.dataset[urlKey];
+    if (!url) return;
+    post(url, card.hasAttribute("data-" + flag) ? { _method: "delete" } : null);
+  }
+
+  function assignMe() {
+    if (document.getElementById("card-sheet") && clickHotkey("me")) return;
+    const card = selectedCard();
+    if (card && card.dataset.assignUrl) post(card.dataset.assignUrl);
+  }
+
+  function openField(name) {
+    const field = document.querySelector('[data-hotkey-target="' + name + '"]');
+    if (!field) return;
+    const dialog = field.closest("dialog");
+    if (dialog && !dialog.open) dialog.show();
+    field.focus();
+  }
+
+  function openJump() {
+    toggleDialog("jump", true);
+    const jump = dialogById("jump");
+    if (jump && jump.open && jumpFilter) jumpFilter.focus();
+  }
+
+  function openComposer() {
+    const composer = document.querySelector(".cards--maybe [data-add-card]");
+    if (composer && composer.requestSubmit) composer.requestSubmit();
+  }
+
+  function editTitle() {
+    if (document.getElementById("card-sheet")) {
+      const edit = document.querySelector("[data-hotkey-target='edit']");
+      if (edit && !edit.closest("[hidden]")) {
+        edit.focus();
+        if (edit.select) edit.select();
+        return;
+      }
+      setCardEditing(true);
+      return;
+    }
+    const card = selectedCard();
+    const link = card && card.querySelector(".card__link");
+    if (link) window.location.href = link.href.split("#")[0] + "#edit";
+  }
+
+  function showSearchHit(direction) {
+    if (!lastSearchCards || !lastSearchCards.length || !barResults) return;
+    if (!barResults.querySelector(".search__result")) {
+      if (barField && barField.hidden) openSearch();
+      renderSearch(lastSearchCards);
+    } else if (barModal && !barModal.open) barModal.show();
+    moveLinks(barResults, direction);
+  }
+
+  function spaceCommand(key) {
+    if (key === " ") openJump();
+    else if (key === "p") toggleDialog("pins-tray", false);
+    else if (key === "P") toggleFlag("pin", "pinUrl", "pinned");
+    else if (key === "n") toggleDialog("notes-tray", false);
+    else if (key === "f") openField("filter");
+    else if (key === "m") assignMe();
+    else if (key === "g") toggleFlag("gold", "goldUrl", "gold");
+    else if (key === "w") toggleFlag("watch", "watchUrl", "watching");
+    else if (key === "t") openField("tag");
+    else if (key === "a") openField("assign");
+  }
+
+  function handlePending(event) {
+    const key = event.key;
+    const kind = pending;
+    pending = null;
+    event.preventDefault();
+    if (key === "Escape") {
+      dropCount();
+      return;
+    }
+    if (kind === "d") {
+      if (key === "d") runLineAction("done", takeCount());
+      else if (key === "n") runLineAction("notnow", takeCount());
+      else dropCount();
+      return;
+    }
+    if (kind === "g") {
+      dropCount();
+      if (key === "g") goEnds("first");
+      return;
+    }
+    if (kind === "f" || kind === "F") {
+      dropCount();
+      if (key.length === 1 && key !== " ") {
+        const direction = kind === "F" ? -1 : 1;
+        lastFind = { char: key, direction: direction };
+        findCard(key, direction);
+      }
+      return;
+    }
+    if (kind === "space") {
+      dropCount();
+      spaceCommand(key);
+    }
+  }
+
+  function moveMotion(key, steps) {
+    if (key === "j" || key === "ArrowDown") {
+      if (!onCardPage()) moveCard(steps);
+      return;
+    }
+    if (key === "k" || key === "ArrowUp") {
+      if (!onCardPage()) moveCard(-steps);
+      return;
+    }
+    if (key === "h" || key === "ArrowLeft") {
+      if (columns().length) moveColumn(-steps);
+      else if (steps === 1) goBack();
+      return;
+    }
+    if (key === "l" || key === "ArrowRight") {
+      if (columns().length) moveColumn(steps);
+    }
+  }
+
   document.addEventListener("keydown", function (event) {
     const key = event.key;
     const meta = event.metaKey || event.ctrlKey;
@@ -1038,6 +1349,12 @@
     }
 
     if (key === "Escape") {
+      if (pending || count) {
+        pending = null;
+        count = 0;
+        event.preventDefault();
+        return;
+      }
       const open = document.querySelector("dialog[open]");
       if (open) {
         open.close();
@@ -1061,13 +1378,7 @@
         event.preventDefault();
         return;
       }
-      if (!typing(event)) {
-        const back = document.querySelector("[data-back]");
-        if (back) {
-          event.preventDefault();
-          back.click();
-        }
-      }
+      if (!typing(event)) goBack();
       return;
     }
 
@@ -1081,25 +1392,21 @@
       return;
     }
 
-    if ((key === "j" || key === "J") && (plain || (meta && !event.shiftKey && !event.altKey)) && !typing(event)) {
-      event.preventDefault();
-      toggleDialog("jump", true);
-      if (jump && jump.open && jumpFilter) jumpFilter.focus();
-      return;
-    }
-
-    if (jump && jump.open && plain && (key === "1" || key === "2" || key === "3")) {
-      if (event.target === jumpFilter && jumpFilter.value) return;
-      const link = document.querySelector('a[data-menu-key="' + key + '"]');
-      if (link) {
-        event.preventDefault();
-        link.click();
+    if (pending) {
+      if (typing(event) || event.repeat) {
+        if (!event.repeat) {
+          pending = null;
+          count = 0;
+        } else event.preventDefault();
+        if (event.repeat) return;
+      } else {
+        handlePending(event);
+        return;
       }
-      return;
     }
 
     if (barField && !barField.hidden && (event.target === barInput || (event.target.closest && event.target.closest(".bar__results")))) {
-      if (plain && (key === "ArrowDown" || key === "ArrowUp") && barResults) {
+      if (!meta && !event.altKey && (key === "ArrowDown" || key === "ArrowUp") && barResults) {
         event.preventDefault();
         moveLinks(barResults, key === "ArrowDown" ? 1 : -1);
         return;
@@ -1114,8 +1421,34 @@
       }
     }
 
+    if (jump && jump.open && plain && (key === "1" || key === "2" || key === "3")) {
+      if (!(jumpFilter && event.target === jumpFilter && jumpFilter.value)) {
+        const link = document.querySelector('a[data-menu-key="' + key + '"]');
+        if (link) {
+          event.preventDefault();
+          link.click();
+          return;
+        }
+      }
+    }
+
     const openDialog = document.querySelector("dialog[open]");
-    if (openDialog && plain && (key === "ArrowDown" || key === "ArrowUp" || key === "Enter")) {
+    if (openDialog && !typing(event) && !meta && !event.altKey) {
+      if ((key === "n" || key === "N") && openDialog === barModal) {
+        event.preventDefault();
+        showSearchHit(key === "N" ? -1 : 1);
+        return;
+      }
+      if (key === "j" || key === "ArrowDown") {
+        event.preventDefault();
+        moveLinks(openDialog, 1);
+        return;
+      }
+      if (key === "k" || key === "ArrowUp") {
+        event.preventDefault();
+        moveLinks(openDialog, -1);
+        return;
+      }
       if (key === "Enter") {
         const chosen = openDialog.querySelector("[aria-selected='true']");
         if (chosen) {
@@ -1124,154 +1457,103 @@
         }
         return;
       }
-      event.preventDefault();
-      moveLinks(openDialog, key === "ArrowDown" ? 1 : -1);
       return;
     }
 
     if (typing(event)) return;
-    const trayKey = plain && (key === "p" || key === "P" || key === "n" || key === "N" || key === "k" || key === "K");
-    if (document.querySelector("dialog[open]") && !trayKey) return;
 
-    if (plain && (key === "k" || key === "K")) {
-      if (!barInput) return;
+    if (!meta && !event.altKey && key.length === 1 && key >= "0" && key <= "9" && !(key === "0" && !count)) {
+      count = Math.min(999, count * 10 + Number(key));
       event.preventDefault();
+      return;
+    }
+
+    if (plain && (key === "j" || key === "k" || key === "h" || key === "l" || key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown")) {
+      event.preventDefault();
+      moveMotion(key, takeCount());
+      return;
+    }
+    if (!meta && !event.altKey && key === "G") {
+      event.preventDefault();
+      goEnds("last");
+      return;
+    }
+    if (plain && key === "g") {
+      if (event.repeat) return;
+      event.preventDefault();
+      pending = "g";
+      return;
+    }
+    if (plain && key === "d") {
+      if (event.repeat) return;
+      event.preventDefault();
+      pending = "d";
+      return;
+    }
+    if (!meta && !event.altKey && key === "f" && !event.shiftKey) {
+      if (event.repeat) return;
+      event.preventDefault();
+      pending = "f";
+      return;
+    }
+    if (!meta && !event.altKey && key === "F") {
+      if (event.repeat) return;
+      event.preventDefault();
+      pending = "F";
+      return;
+    }
+    if (plain && key === ";") {
+      event.preventDefault();
+      dropCount();
+      if (lastFind) findCard(lastFind.char, lastFind.direction);
+      return;
+    }
+    if (plain && key === ",") {
+      event.preventDefault();
+      dropCount();
+      if (lastFind) findCard(lastFind.char, -lastFind.direction);
+      return;
+    }
+    if (plain && key === ".") {
+      event.preventDefault();
+      dropCount();
+      if (lastChange) runLineAction(lastChange, 1);
+      return;
+    }
+    if (plain && key === "o") {
+      event.preventDefault();
+      dropCount();
+      openComposer();
+      return;
+    }
+    if (plain && key === "i") {
+      event.preventDefault();
+      dropCount();
+      editTitle();
+      return;
+    }
+    if (plain && key === "/") {
+      event.preventDefault();
+      dropCount();
       openSearch();
       return;
     }
-    if (event.shiftKey && !meta && !event.altKey && key === "P") {
-      if (clickHotkey("pin")) event.preventDefault();
-      return;
-    }
-    if (plain && (key === "p" || key === "P")) {
+    if (!meta && !event.altKey && (key === "n" || key === "N") && lastSearchCards) {
       event.preventDefault();
-      toggleDialog("pins-tray", false);
+      dropCount();
+      showSearchHit(key === "N" ? -1 : 1);
       return;
     }
-    if (event.shiftKey && !meta && !event.altKey && key === "N") {
-      if (clickHotkey("watch")) event.preventDefault();
-      return;
-    }
-    if (plain && (key === "n" || key === "N")) {
+    if (!meta && !event.altKey && key === "?") {
       event.preventDefault();
-      toggleDialog("notes-tray", false);
+      dropCount();
+      showKeymap();
       return;
     }
-    if (plain && (key === "f" || key === "F")) {
-      const filter = document.querySelector('[data-hotkey-target="filter"]');
-      if (filter) {
-        event.preventDefault();
-        filter.focus();
-      }
-      return;
-    }
-    if (plain && (key === "c" || key === "C")) {
-      const composer = document.querySelector(".cards--maybe [data-add-card]");
-      if (composer) {
-        event.preventDefault();
-        composer.requestSubmit();
-      }
-      return;
-    }
-    if (plain && (key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown")) {
-      if (columns().length) {
-        event.preventDefault();
-        if (key === "ArrowRight") moveColumn(1);
-        else if (key === "ArrowLeft") moveColumn(-1);
-        else if (key === "ArrowDown") moveCard(1);
-        else moveCard(-1);
-        return;
-      }
-      if (document.querySelector(".cards-grid, .card-grid") && (key === "ArrowDown" || key === "ArrowUp")) {
-        event.preventDefault();
-        moveGrid(key === "ArrowDown" ? 1 : -1);
-        return;
-      }
-      if (key === "ArrowLeft") {
-        const back = document.querySelector("[data-back]");
-        if (back) {
-          event.preventDefault();
-          back.click();
-        }
-      }
-      return;
-    }
-    if (plain && key === "Enter" && (boardRoot() || document.querySelector(".cards-grid, .card-grid"))) {
-      const card = selectedCard();
-      const link = card && card.querySelector(".card__link");
-      if (link) {
-        event.preventDefault();
-        window.location.href = link.href;
-      }
-      return;
-    }
-    if (plain && key === "[") {
-      const card = selectedCard();
-      if (card && card.dataset.notNowUrl) {
-        event.preventDefault();
-        post(card.dataset.notNowUrl);
-        return;
-      }
-      if (clickHotkey("postpone")) event.preventDefault();
-      return;
-    }
-    if (plain && key === "]") {
-      const card = selectedCard();
-      if (card && card.dataset.closureUrl) {
-        event.preventDefault();
-        post(card.dataset.closureUrl);
-        return;
-      }
-      if (clickHotkey("done")) event.preventDefault();
-      return;
-    }
-    if (plain && (key === "m" || key === "M")) {
-      const card = (boardRoot() || document.querySelector(".cards-grid")) ? selectedCard() : null;
-      if (card && card.dataset.assignUrl) {
-        event.preventDefault();
-        post(card.dataset.assignUrl);
-        return;
-      }
-      if (clickHotkey("me")) event.preventDefault();
-      return;
-    }
-    if (event.shiftKey && !meta && !event.altKey && key === "G") {
-      if (clickHotkey("gold")) event.preventDefault();
-      return;
-    }
-    if (plain && (key === "d" || key === "D")) {
-      if (clickHotkey("done")) event.preventDefault();
-      return;
-    }
-    if (plain && (key === "e" || key === "E")) {
-      const edit = document.querySelector('[data-hotkey-target="edit"]');
-      if (edit && !edit.closest("[hidden]")) {
-        event.preventDefault();
-        edit.focus();
-        if (edit.select) edit.select();
-        return;
-      }
-      if (clickHotkey("edit") || setCardEditing(true)) event.preventDefault();
-      return;
-    }
-    if (plain && (key === "t" || key === "T")) {
-      const tag = document.querySelector('[data-hotkey-target="tag"]');
-      if (tag) {
-        event.preventDefault();
-        const dialog = tag.closest("dialog");
-        if (dialog && !dialog.open) dialog.show();
-        tag.focus();
-      }
-      return;
-    }
-    if (plain && (key === "a" || key === "A")) {
-      const assign = document.querySelector('[data-hotkey-target="assign"]');
-      if (assign) {
-        event.preventDefault();
-        const dialog = assign.closest("dialog");
-        if (dialog && !dialog.open) dialog.show();
-        assign.focus();
-      }
+    if (!meta && !event.altKey && key === " ") {
+      if (event.repeat) return;
+      event.preventDefault();
+      pending = "space";
     }
   });
 
@@ -1281,6 +1563,8 @@
       if (!window.confirm("Continue and " + label.trim().toLowerCase() + "?")) event.preventDefault();
     });
   });
+
+  if (window.location.hash === "#edit") setCardEditing(true);
 
   document.documentElement.dataset.fizzyReady = "1";
 })();
