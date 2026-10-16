@@ -254,6 +254,12 @@ class SchemaTests(unittest.TestCase):
                 (notification, account, now, event, now, user),
             )
             raw.execute(
+                """INSERT INTO notifications
+                   (id, account_id, created_at, source_id, source_type, updated_at, user_id)
+                   VALUES (?, ?, ?, ?, 'Digest', ?, ?)""",
+                (b"\x0e" * 16, account, now, b"\x0f" * 16, now, user),
+            )
+            raw.execute(
                 "INSERT INTO card_activity_spikes (id, card_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
                 (b"\x0b" * 16, card, now, now),
             )
@@ -296,9 +302,15 @@ class SchemaTests(unittest.TestCase):
             self.assertEqual(reacted["content"], "Yes")
             self.assertEqual(reacted["reactable_type"], "Comment")
             self.assertEqual(reacted["reactable_id"], bytes_to_base36(comment))
-            noted = conn.execute("SELECT card_id, unread_count FROM notifications").fetchone()
+            noted = conn.execute(
+                "SELECT card_id, unread_count FROM notifications WHERE source_type = 'Event'"
+            ).fetchone()
             self.assertEqual(noted["card_id"], bytes_to_base36(card))
             self.assertEqual(noted["unread_count"], 1)
+            kept = conn.execute(
+                "SELECT card_id FROM notifications WHERE source_type = 'Digest'"
+            ).fetchone()
+            self.assertIsNone(kept["card_id"])
             spikes = conn.execute("SELECT COUNT(*) AS n FROM card_activity_spikes").fetchone()
             self.assertEqual(spikes["n"], 1)
             versions = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")}
@@ -320,6 +332,187 @@ class SchemaTests(unittest.TestCase):
                 again.execute("SELECT identity_id FROM users").fetchone()["identity_id"],
                 bytes_to_base36(identity),
             )
+            again.close()
+
+    def test_duplicate_card_numbers_do_not_block_opening(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "zeros.sqlite3"
+            account = b"\x11" * 16
+            user = b"\x12" * 16
+            board = b"\x13" * 16
+            now = "2026-03-01 00:00:00.000000"
+            raw = sqlite3.connect(path)
+            raw.executescript(
+                """
+                CREATE TABLE schema_migrations (version varchar NOT NULL PRIMARY KEY);
+                CREATE TABLE accounts (
+                    id blob PRIMARY KEY, name varchar NOT NULL, cards_count bigint NOT NULL DEFAULT 0,
+                    created_at datetime NOT NULL, updated_at datetime NOT NULL
+                );
+                CREATE TABLE users (
+                    id blob PRIMARY KEY, account_id blob NOT NULL, identity_id blob,
+                    active boolean NOT NULL DEFAULT 1, name varchar NOT NULL,
+                    role varchar NOT NULL DEFAULT 'owner', created_at datetime NOT NULL, updated_at datetime NOT NULL
+                );
+                CREATE TABLE boards (
+                    id blob PRIMARY KEY, account_id blob, all_access boolean NOT NULL DEFAULT 1,
+                    creator_id blob NOT NULL, name varchar NOT NULL,
+                    created_at datetime NOT NULL, updated_at datetime NOT NULL
+                );
+                CREATE TABLE cards (
+                    id blob PRIMARY KEY, account_id blob, board_id blob NOT NULL,
+                    created_at datetime NOT NULL, creator_id blob NOT NULL,
+                    last_active_at datetime NOT NULL, number bigint NOT NULL DEFAULT 0,
+                    status varchar NOT NULL DEFAULT 'published', title varchar, updated_at datetime NOT NULL
+                );
+                """
+            )
+            raw.execute(
+                "INSERT INTO accounts (id, name, cards_count, created_at, updated_at) VALUES (?, 'Home', 0, ?, ?)",
+                (account, now, now),
+            )
+            raw.execute(
+                """INSERT INTO users (id, account_id, name, role, created_at, updated_at)
+                   VALUES (?, ?, 'Ada', 'owner', ?, ?)""",
+                (user, account, now, now),
+            )
+            raw.execute(
+                """INSERT INTO boards (id, account_id, creator_id, name, created_at, updated_at)
+                   VALUES (?, ?, ?, 'Product', ?, ?)""",
+                (board, account, user, now, now),
+            )
+            titles = []
+            for index, title in enumerate(("Keep", "Also", "Third")):
+                card = bytes([0x20 + index]) * 16
+                titles.append((card, title, f"2026-03-0{index + 1} 00:00:00.000000"))
+                raw.execute(
+                    """INSERT INTO cards
+                       (id, account_id, board_id, created_at, creator_id, last_active_at, number, title, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                    (card, account, board, titles[-1][2], user, titles[-1][2], title, titles[-1][2]),
+                )
+            raw.commit()
+            raw.close()
+
+            conn = connect(path)
+            numbered = {
+                row["title"]: row["number"]
+                for row in conn.execute("SELECT title, number FROM cards")
+            }
+            self.assertEqual(numbered, {"Keep": 1, "Also": 2, "Third": 3})
+            self.assertEqual(conn.execute("SELECT cards_count FROM accounts").fetchone()["cards_count"], 3)
+            index = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name='index_cards_on_account_id_and_number'"
+            ).fetchone()
+            self.assertIsNotNone(index)
+            conn.close()
+
+            again = connect(path)
+            self.assertEqual(
+                {row["title"]: row["number"] for row in again.execute("SELECT title, number FROM cards")},
+                numbered,
+            )
+            again.close()
+
+    def test_existing_rows_survive_a_second_open(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "current.sqlite3"
+            account = b"\x31" * 16
+            identity = b"\x32" * 16
+            user = b"\x33" * 16
+            board = b"\x34" * 16
+            first = b"\x35" * 16
+            second = b"\x36" * 16
+            note = b"\x37" * 16
+            source = b"\x38" * 16
+            now = "2026-04-01 00:00:00.000000"
+            conn = connect(path)
+            conn.execute(
+                "INSERT INTO identities (id, email_address, created_at, updated_at, staff) VALUES (?, 'ada@example.com', ?, ?, 0)",
+                (identity, now, now),
+            )
+            conn.execute(
+                """INSERT INTO accounts (id, name, cards_count, external_account_id, created_at, updated_at)
+                   VALUES (?, 'Home', 2, 7, ?, ?)""",
+                (account, now, now),
+            )
+            conn.execute(
+                """INSERT INTO users (id, account_id, identity_id, active, name, role, created_at, updated_at)
+                   VALUES (?, ?, ?, 1, 'Ada', 'owner', ?, ?)""",
+                (user, account, identity, now, now),
+            )
+            conn.execute(
+                """INSERT INTO boards (id, account_id, all_access, creator_id, name, created_at, updated_at)
+                   VALUES (?, ?, 1, ?, 'Product', ?, ?)""",
+                (board, account, user, now, now),
+            )
+            conn.execute(
+                """INSERT INTO cards
+                   (id, account_id, board_id, creator_id, last_active_at, number, status, title, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, 4, 'published', 'Keep', ?, ?)""",
+                (first, account, board, user, now, now, now),
+            )
+            conn.execute(
+                """INSERT INTO cards
+                   (id, account_id, board_id, creator_id, last_active_at, number, status, title, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, 9, 'published', 'Also', ?, ?)""",
+                (second, account, board, user, now, now, now),
+            )
+            conn.execute(
+                """INSERT INTO notifications
+                   (id, account_id, card_id, created_at, read_at, source_id, source_type, unread_count, updated_at, user_id)
+                   VALUES (?, ?, ?, ?, NULL, ?, 'Event', 5, ?, ?)""",
+                (note, account, first, now, source, now, user),
+            )
+            conn.execute(
+                """INSERT INTO search_records
+                   (account_id, board_id, card_id, content, created_at, searchable_id, searchable_type, title)
+                   VALUES (?, ?, ?, 'secret body', ?, ?, 'Card', 'Keep')""",
+                (account, board, first, now, first),
+            )
+            conn.execute(
+                """CREATE TABLE search_records_3 (
+                    id blob PRIMARY KEY, account_id blob NOT NULL, board_id blob NOT NULL,
+                    card_id blob NOT NULL, content text, created_at datetime NOT NULL,
+                    searchable_id blob NOT NULL, searchable_type varchar NOT NULL, title varchar
+                )"""
+            )
+            conn.execute(
+                """INSERT INTO search_records_3
+                   (id, account_id, board_id, card_id, content, created_at, searchable_id, searchable_type, title)
+                   VALUES (?, ?, ?, ?, 'from a shard', ?, ?, 'Comment', 'Note')""",
+                (b"\x3a" * 16, account, board, first, now, b"\x3b" * 16),
+            )
+            conn.commit()
+            conn.close()
+
+            opened = connect(path)
+            cards = {
+                row["title"]: row["number"]
+                for row in opened.execute("SELECT title, number FROM cards ORDER BY number")
+            }
+            self.assertEqual(cards, {"Keep": 4, "Also": 9})
+            self.assertEqual(opened.execute("SELECT cards_count FROM accounts").fetchone()["cards_count"], 9)
+            self.assertEqual(
+                opened.execute("SELECT unread_count FROM notifications").fetchone()["unread_count"],
+                5,
+            )
+            self.assertEqual(opened.execute("SELECT COUNT(*) AS n FROM notifications").fetchone()["n"], 1)
+            contents = {row["content"] for row in opened.execute("SELECT content FROM search_records")}
+            self.assertEqual(contents, {"secret body", "from a shard"})
+            self.assertFalse(_table(opened, "search_records_3"))
+            opened.close()
+
+            again = connect(path)
+            self.assertEqual(
+                {row["title"]: row["number"] for row in again.execute("SELECT title, number FROM cards")},
+                cards,
+            )
+            self.assertEqual(
+                again.execute("SELECT unread_count FROM notifications WHERE source_type = 'Event'").fetchone()["unread_count"],
+                5,
+            )
+            self.assertEqual(again.execute("SELECT COUNT(*) AS n FROM search_records").fetchone()["n"], 2)
             again.close()
 
 

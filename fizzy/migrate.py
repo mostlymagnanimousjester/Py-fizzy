@@ -134,9 +134,10 @@ def upgrade(conn: sqlite3.Connection) -> None:
     """Apply every app migration that this file is still missing."""
     _rename_account_exports(conn)
     _fold_memberships(conn)
-    _drop_obsolete_tables(conn)
     for statement in table_statements():
         conn.execute(statement)
+    _copy_search_shards(conn)
+    _drop_obsolete_tables(conn)
     _add_missing_columns(conn)
     _backfill(conn)
     _migrate_reactions(conn)
@@ -205,10 +206,77 @@ def _fold_memberships(conn) -> None:
             WHERE identity_id IS NULL AND membership_id IS NOT NULL
             """
         )
-    conn.execute("DROP INDEX IF EXISTS index_users_on_membership_id")
-    conn.execute('ALTER TABLE users DROP COLUMN "membership_id"')
+    _drop_indexes_using(conn, "users", "membership_id")
+    try:
+        conn.execute('ALTER TABLE users DROP COLUMN "membership_id"')
+    except sqlite3.OperationalError:
+        # A view or an index SQLite will not drop must not block the rest of
+        # the migration. The extra column is nullable and unread by this app.
+        pass
     if _has_table(conn, "memberships"):
         conn.execute("DROP TABLE memberships")
+
+
+def _drop_indexes_using(conn, table: str, column: str) -> None:
+    if not _has_table(conn, table):
+        return
+    for row in conn.execute(f'PRAGMA index_list("{table}")'):
+        name = row["name"]
+        if not name or name.startswith("sqlite_"):
+            continue
+        used = {info["name"] for info in conn.execute(f'PRAGMA index_info("{name}")')}
+        if column in used:
+            conn.execute(f'DROP INDEX IF EXISTS "{name}"')
+
+
+def _copy_search_shards(conn) -> None:
+    """Keep MySQL shard rows that were loaded into this SQLite file.
+
+    ``search_records_0`` .. ``search_records_15`` are not the SQLite schema, but
+    dropping them threw away the only copy of that search text. Copy the rows
+    into the single ``search_records`` table first.
+    """
+    if not _has_table(conn, "search_records"):
+        return
+    dest = _column_names(conn, "search_records")
+    wanted = (
+        "account_id",
+        "board_id",
+        "card_id",
+        "content",
+        "created_at",
+        "searchable_id",
+        "searchable_type",
+        "title",
+    )
+    rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    for row in rows:
+        name = row["name"]
+        if not re.fullmatch(r"search_records_\d+", name):
+            continue
+        present = _column_names(conn, name)
+        cols = [column for column in wanted if column in dest and column in present]
+        if "searchable_id" not in cols or "searchable_type" not in cols:
+            continue
+        quoted = ", ".join(f'"{column}"' for column in cols)
+        required = [
+            column
+            for column in ("account_id", "board_id", "card_id", "created_at", "searchable_id", "searchable_type")
+            if column in cols
+        ]
+        guard = " AND ".join(f'src."{column}" IS NOT NULL' for column in required)
+        conn.execute(
+            f'''
+            INSERT INTO search_records ({quoted})
+            SELECT {quoted} FROM "{name}" AS src
+            WHERE {guard}
+              AND NOT EXISTS (
+                SELECT 1 FROM search_records AS existing
+                WHERE existing.searchable_type = src.searchable_type
+                  AND existing.searchable_id = src.searchable_id
+              )
+            '''
+        )
 
 
 def _drop_obsolete_tables(conn) -> None:
@@ -429,26 +497,54 @@ def _copy_record_account(conn, table: str, type_column: str, id_column: str) -> 
 
 
 def _backfill_card_numbers(conn) -> None:
+    """Give every card a positive number that is unique inside its account.
+
+    A populated file can already have ``number`` filled with 0. SQLite's
+    ``ADD COLUMN ... NOT NULL`` without a default stores 0, and the unique
+    index on ``(account_id, number)`` then raises. That exception aborted
+    ``connect()``, so a database that already had cards would not open.
+    Numbers that are already positive and unique are left alone.
+    """
     if not _has_table(conn, "cards") or "number" not in _column_names(conn, "cards"):
         return
     conn.execute("DROP TABLE IF EXISTS fizzy_card_number_backfill")
     conn.execute(
         """
         CREATE TEMP TABLE fizzy_card_number_backfill AS
-        SELECT numbered.id AS id, base.base_n + numbered.rn AS number
-        FROM (
-            SELECT id, account_id,
-                   ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY created_at, id) AS rn
+        WITH ranked AS (
+            SELECT id, account_id, created_at,
+                   CASE WHEN number IS NOT NULL AND number > 0 THEN number END AS positive,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY account_id,
+                                    CASE WHEN number IS NOT NULL AND number > 0 THEN number END
+                       ORDER BY created_at, id
+                   ) AS dup_rn
             FROM cards
-            WHERE number IS NULL
-        ) AS numbered
-        JOIN (
+        ),
+        keepers AS (
+            SELECT id, account_id, positive AS number
+            FROM ranked
+            WHERE positive IS NOT NULL AND dup_rn = 1
+        ),
+        base AS (
             SELECT account_id, COALESCE(MAX(number), 0) AS base_n
-            FROM cards
+            FROM keepers
             GROUP BY account_id
-        ) AS base
-          ON base.account_id = numbered.account_id
-          OR (base.account_id IS NULL AND numbered.account_id IS NULL)
+        ),
+        needs AS (
+            SELECT ranked.id, ranked.account_id, ranked.created_at
+            FROM ranked
+            WHERE ranked.id NOT IN (SELECT id FROM keepers)
+        )
+        SELECT needs.id AS id,
+               COALESCE(base.base_n, 0) + ROW_NUMBER() OVER (
+                   PARTITION BY needs.account_id
+                   ORDER BY needs.created_at, needs.id
+               ) AS number
+        FROM needs
+        LEFT JOIN base
+          ON base.account_id = needs.account_id
+          OR (base.account_id IS NULL AND needs.account_id IS NULL)
         """
     )
     conn.execute(
@@ -457,8 +553,7 @@ def _backfill_card_numbers(conn) -> None:
             SELECT number FROM fizzy_card_number_backfill
             WHERE fizzy_card_number_backfill.id = cards.id
         )
-        WHERE number IS NULL
-          AND id IN (SELECT id FROM fizzy_card_number_backfill)
+        WHERE id IN (SELECT id FROM fizzy_card_number_backfill)
         """
     )
     conn.execute("DROP TABLE fizzy_card_number_backfill")
@@ -588,7 +683,8 @@ def _backfill_notifications(conn) -> None:
             WHERE card_id IS NOT NULL AND unread_count = 0 AND read_at IS NULL
             """
         )
-    conn.execute("DELETE FROM notifications WHERE card_id IS NULL")
+    # Rows whose card cannot be resolved stay. Deleting them on every open
+    # removed inbox history from a file that already had notifications.
 
 
 def _dedupe_card_activity_spikes(conn) -> None:
@@ -670,7 +766,10 @@ def _ensure_indexes(conn) -> None:
         kind = "UNIQUE INDEX" if unique else "INDEX"
         try:
             conn.execute(f'CREATE {kind} IF NOT EXISTS "{name}" ON "{table}" ({columns})')
-        except sqlite3.OperationalError:
+        except (sqlite3.OperationalError, sqlite3.IntegrityError):
+            # A duplicate row must not stop the file from opening. Card numbers
+            # are repaired before this step; anything still conflicting keeps
+            # its rows and skips only this index.
             continue
 
 

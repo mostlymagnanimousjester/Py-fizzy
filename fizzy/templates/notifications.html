@@ -30,10 +30,17 @@
   <ol class="feed">
     {% for note in notes %}
     <li class="{% if not note.read %}unread{% endif %}">
+      {% if note.card %}
       <a href="{{ slug }}/cards/{{ note.card.number }}">
         <strong>{{ note.body }}</strong>
         <span>{{ note.created_at }}{% if note.unread_count %} · {{ note.unread_count }} new{% endif %}</span>
       </a>
+      {% else %}
+      <div>
+        <strong>{{ note.body }}</strong>
+        <span>{{ note.created_at }}{% if note.unread_count %} · {{ note.unread_count }} new{% endif %}</span>
+      </div>
+      {% endif %}
       <form method="post" action="{{ slug }}/notifications/{{ note.id }}/reading">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         {% if not note.read %}<button type="submit">Mark read</button>{% else %}

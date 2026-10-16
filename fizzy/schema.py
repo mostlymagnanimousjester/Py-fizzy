@@ -697,6 +697,13 @@ def _column_names(conn, table: str) -> set[str]:
     return {row["name"] for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()}
 
 
+def _has_table(conn, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (name,),
+    ).fetchone() is not None
+
+
 def _migrate_reactions(conn) -> None:
     """Port of db/migrate/20260121155752_make_reactions_polymorphic.rb.
 
@@ -708,20 +715,40 @@ def _migrate_reactions(conn) -> None:
         return
     if "comment_id" not in columns:
         return
-    account_sql = "COALESCE(old.account_id, comments.account_id)" if "account_id" in columns else "comments.account_id"
+    account_parts = []
+    if "account_id" in columns:
+        account_parts.append("old.account_id")
+    comment_columns = _column_names(conn, "comments") if _has_table(conn, "comments") else set()
+    if "account_id" in comment_columns:
+        account_parts.append("comments.account_id")
+    if "card_id" in comment_columns and _has_table(conn, "cards"):
+        account_parts.append("(SELECT cards.account_id FROM cards WHERE cards.id = comments.card_id)")
+    if "reacter_id" in columns and _has_table(conn, "users"):
+        account_parts.append("(SELECT users.account_id FROM users WHERE users.id = old.reacter_id)")
+    account_sql = f"COALESCE({', '.join(account_parts)})" if account_parts else "NULL"
     reactable_id_sql = "COALESCE(old.reactable_id, old.comment_id)" if "reactable_id" in columns else "old.comment_id"
     reactable_type_sql = "COALESCE(old.reactable_type, 'Comment')" if "reactable_type" in columns else "'Comment'"
-    missing = conn.execute(
+    if not account_parts:
+        return
+    total = conn.execute("SELECT COUNT(*) AS n FROM reactions").fetchone()["n"]
+    movable = conn.execute(
         f"""
         SELECT COUNT(*) AS n FROM reactions AS old
         LEFT JOIN comments ON comments.id = old.comment_id
-        WHERE {account_sql} IS NULL
+        WHERE {account_sql} IS NOT NULL
         """
     ).fetchone()["n"]
-    if missing:
-        raise RuntimeError(
-            f"{missing} reaction(s) have no account, so the reactions table cannot be migrated"
-        )
+    if total and not movable:
+        if "reactable_type" in columns and "reactable_id" in columns:
+            conn.execute(
+                """
+                UPDATE reactions
+                SET reactable_type = COALESCE(reactable_type, 'Comment'),
+                    reactable_id = COALESCE(reactable_id, comment_id)
+                WHERE comment_id IS NOT NULL AND reactable_id IS NULL
+                """
+            )
+        return
     conn.execute("ALTER TABLE reactions RENAME TO reactions__pre_polymorphic")
     try:
         conn.execute(
@@ -747,6 +774,7 @@ def _migrate_reactions(conn) -> None:
                    {reactable_id_sql}, {reactable_type_sql}, old.reacter_id, old.updated_at
             FROM reactions__pre_polymorphic AS old
             LEFT JOIN comments ON comments.id = old.comment_id
+            WHERE {account_sql} IS NOT NULL
             """
         )
         conn.execute("DROP TABLE reactions__pre_polymorphic")
