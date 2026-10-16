@@ -45,23 +45,66 @@
     else localStorage.removeItem(storageKey(column));
   }
 
-  function visibleCards(column) {
-    if (!column || column.classList.contains("is-collapsed")) return [];
-    return Array.from(column.querySelectorAll(".cards__list article.card"));
+  function collectCards(root) {
+    if (!root) return [];
+    const list = root.classList.contains("cards__list") || root.classList.contains("card-grid")
+      ? root
+      : root.querySelector(".cards__list, .card-grid");
+    if (!list) return [];
+    const cards = [];
+    const nodes = list.children;
+    for (let index = 0; index < nodes.length; index += 1) {
+      if (nodes[index].tagName === "ARTICLE") cards.push(nodes[index]);
+    }
+    return cards;
   }
 
+  function visibleCards(column) {
+    if (!column || column.classList.contains("is-collapsed")) return [];
+    return collectCards(column);
+  }
+
+  let cardIndexMemory = 0;
+  let selectedNode = null;
+  let selectedColumn = null;
+
   function selectCard(card) {
-    document.querySelectorAll('article.card[aria-selected="true"]').forEach(function (item) {
-      item.removeAttribute("aria-selected");
-    });
-    if (!card) return;
-    // The card outline is drawn only inside a column that is itself selected.
+    if (selectedNode && selectedNode !== card) {
+      if (selectedNode.isConnected) selectedNode.removeAttribute("aria-selected");
+      else {
+        const stale = document.querySelector('article.card[aria-selected="true"]');
+        if (stale && stale !== card) stale.removeAttribute("aria-selected");
+      }
+    }
+    if (!card) {
+      selectedNode = null;
+      return;
+    }
     const column = card.closest("section.cards");
-    document.querySelectorAll("section.cards[aria-selected='true']").forEach(function (item) {
-      if (item !== column) item.removeAttribute("aria-selected");
-    });
-    if (column) column.setAttribute("aria-selected", "true");
+    if (column) {
+      const siblings = collectCards(column);
+      for (let index = 0; index < siblings.length; index += 1) {
+        if (siblings[index] === card) {
+          cardIndexMemory = index;
+          break;
+        }
+      }
+    }
+    // The card outline is drawn only inside a column that is itself selected.
+    if (selectedColumn && selectedColumn !== column) {
+      if (selectedColumn.isConnected) selectedColumn.removeAttribute("aria-selected");
+      else {
+        document.querySelectorAll("section.cards[aria-selected='true']").forEach(function (item) {
+          if (item !== column) item.removeAttribute("aria-selected");
+        });
+      }
+    }
+    if (column) {
+      column.setAttribute("aria-selected", "true");
+      selectedColumn = column;
+    }
     card.setAttribute("aria-selected", "true");
+    selectedNode = card;
     const active = document.activeElement;
     const field = active && active.closest && active.closest("input, textarea, select, [contenteditable]");
     if (!field && active !== card) card.focus({ preventScroll: true });
@@ -74,9 +117,13 @@
   }
 
   function selectedCard() {
-    const card = document.querySelector('article.card[aria-selected="true"]');
-    if (!card || (card.closest("section.cards") && card.closest("section.cards").classList.contains("is-collapsed"))) return null;
-    return card;
+    if (!selectedNode || !selectedNode.isConnected) {
+      selectedNode = document.querySelector('article.card[aria-selected="true"]');
+    }
+    if (!selectedNode) return null;
+    const column = selectedNode.closest("section.cards");
+    if (column && column.classList.contains("is-collapsed")) return null;
+    return selectedNode;
   }
 
   function showColumn(column, options) {
@@ -163,8 +210,7 @@
 
   function listedCards() {
     if (boardRoot()) return visibleCards(activeColumn());
-    const grid = gridElement();
-    return grid ? Array.from(grid.querySelectorAll("article.card")) : [];
+    return collectCards(gridElement());
   }
 
   function moveColumn(direction) {
@@ -175,8 +221,9 @@
     const current = activeColumn() || list[0];
     const from = visibleCards(current);
     const selected = selectedCard();
-    let cardIndex = from.indexOf(selected);
-    if (cardIndex < 0) cardIndex = 0;
+    const found = from.indexOf(selected);
+    if (found >= 0) cardIndexMemory = found;
+    const cardIndex = cardIndexMemory;
     const index = Math.max(0, list.indexOf(current));
     const destIndex = Math.max(0, Math.min(list.length - 1, index + sign * steps));
     if (destIndex === index) return false;
@@ -211,7 +258,7 @@
 
   function recount(column) {
     if (!column) return;
-    const count = column.querySelectorAll(".cards__list article.card").length;
+    const count = collectCards(column).length;
     column.style.setProperty("--card-count", String(Math.min(count, 15)));
     column.dataset.cardCount = String(count);
     const badge = column.querySelector(".cards__expander-count");
@@ -351,6 +398,7 @@
       if (type.indexOf("application/json") >= 0) {
         return response.json().then(function (payload) {
           if (payload && payload.html) placeCard(payload);
+          return payload;
         });
       }
       window.location.reload();
@@ -495,14 +543,23 @@
 
   paintBubbles(document);
 
+  let dialogOpen = false;
+  document.addEventListener("toggle", function (event) {
+    const dialog = event.target;
+    if (!dialog || dialog.tagName !== "DIALOG") return;
+    dialogOpen = dialog.open || !!document.querySelector("dialog[open]");
+  }, true);
+
   document.addEventListener("mouseover", function (event) {
-    if (event.buttons || document.querySelector("dialog[open]")) return;
-    const card = event.target.closest && event.target.closest("article.card");
-    if (!card || !card.closest("#board-stage, .card-columns")) return;
+    if (event.buttons || dialogOpen) return;
+    const target = event.target;
+    if (!target || !target.closest) return;
+    if (selectedNode && selectedNode.isConnected && (target === selectedNode || selectedNode.contains(target))) return;
+    const card = target.closest("article.card");
+    if (!card || card === selectedNode || !card.closest("#board-stage, .card-columns")) return;
     if (event.relatedTarget && card.contains(event.relatedTarget)) return;
     const column = card.closest("section.cards");
     if (column && column.classList.contains("is-collapsed")) return;
-    if (card.getAttribute("aria-selected") === "true") return;
     selectCard(card);
   });
 
@@ -1196,13 +1253,25 @@
     if (!jobs.length) return;
     holdSelection = true;
     let chain = Promise.resolve();
+    let moved = null;
     jobs.forEach(function (url) {
-      chain = chain.then(function () { return post(url); });
+      chain = chain.then(function () {
+        return post(url).then(function (payload) {
+          if (payload) moved = payload;
+        });
+      });
     });
     chain.then(function () {
       holdSelection = false;
       const column = successor && successor.closest("section.cards");
-      if (successor && successor.isConnected && (!column || !column.classList.contains("is-collapsed"))) selectCard(successor);
+      if (successor && successor.isConnected && (!column || !column.classList.contains("is-collapsed"))) {
+        selectCard(successor);
+        return;
+      }
+      const fresh = moved && document.querySelector('article.card[data-number="' + moved.number + '"]');
+      const dest = fresh && fresh.closest("section.cards");
+      if (dest && dest.classList.contains("is-collapsed")) showColumn(dest, { select: false });
+      if (fresh && fresh.isConnected) selectCard(fresh);
       else chooseFallback();
     }, function () {
       holdSelection = false;
@@ -1378,7 +1447,12 @@
         event.preventDefault();
         return;
       }
-      if (!typing(event)) goBack();
+      if (typing(event)) {
+        if (event.target && event.target.blur) event.target.blur();
+        event.preventDefault();
+        return;
+      }
+      goBack();
       return;
     }
 
@@ -1432,7 +1506,7 @@
       }
     }
 
-    const openDialog = document.querySelector("dialog[open]");
+    const openDialog = dialogOpen ? document.querySelector("dialog[open]") : null;
     if (openDialog && !typing(event) && !meta && !event.altKey) {
       if ((key === "n" || key === "N") && openDialog === barModal) {
         event.preventDefault();
@@ -1532,6 +1606,16 @@
       editTitle();
       return;
     }
+    if (plain && key === "Enter" && (boardRoot() || gridElement())) {
+      const card = selectedCard();
+      const link = card && card.querySelector(".card__link");
+      if (link) {
+        event.preventDefault();
+        dropCount();
+        window.location.href = link.href;
+      }
+      return;
+    }
     if (plain && key === "/") {
       event.preventDefault();
       dropCount();
@@ -1565,6 +1649,10 @@
   });
 
   if (window.location.hash === "#edit") setCardEditing(true);
+  else {
+    const editor = document.querySelector("[data-card-editor]");
+    if (editor && !editor.hidden) setCardEditing(true);
+  }
 
   document.documentElement.dataset.fizzyReady = "1";
 })();
