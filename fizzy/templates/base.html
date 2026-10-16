@@ -78,7 +78,7 @@
                 <li class="popup__item"><a class="popup__btn btn" href="/accounts">Switch account</a></li>
               </ul>
             </nav>
-            <p class="txt-x-small translucent">␣␣ jump · / search · hjkl move · dd done · dn not now · ? keys</p>
+            <p class="txt-x-small translucent">␣␣ jump · / search · hjkl move · &gt;&lt; lists · dd done · dn not now · ? keys</p>
           </div>
           <form method="post" action="/logout">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -178,6 +178,6 @@
     <div data-keymap></div>
   </dialog>
   {% endif %}
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v=5) }}"></script>
 </body>
 </html>

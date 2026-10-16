@@ -409,6 +409,18 @@
       || document.querySelector('section.cards[data-lane="' + lane + '"]');
   }
 
+  function columnMoveFields(column, number) {
+    if (!column || !number || !slug) return null;
+    let url = slug + "/cards/" + number + "/triage";
+    const fields = {};
+    if (column.dataset.columnId) fields.column_id = column.dataset.columnId;
+    else if (column.dataset.lane === "maybe") fields._method = "delete";
+    else if (column.dataset.lane === "not_now") url = slug + "/cards/" + number + "/not_now";
+    else if (column.dataset.lane === "closed") url = slug + "/cards/" + number + "/closure";
+    else return null;
+    return { url: url, fields: fields };
+  }
+
   function placeCard(payload) {
     invalidateLists();
     const template = document.createElement("template");
@@ -480,6 +492,179 @@
       window.location.reload();
     });
   }
+
+  let navToken = 0;
+  let movingCard = false;
+
+  function surfaceUrl(url) {
+    let parsed;
+    try { parsed = new URL(url, window.location.href); }
+    catch (error) { return false; }
+    if (parsed.origin !== window.location.origin || !slug) return false;
+    let path = parsed.pathname;
+    if (path.length > 1 && path.charAt(path.length - 1) === "/") path = path.slice(0, -1);
+    if (path.indexOf("/public/") !== -1) return false;
+    const cards = slug + "/cards/";
+    const boards = slug + "/boards/";
+    if (path.indexOf(cards) === 0) return /^\d+$/.test(path.slice(cards.length));
+    if (path.indexOf(boards) === 0) {
+      const rest = path.slice(boards.length);
+      return !!rest && rest.indexOf("/") === -1 && rest !== "new";
+    }
+    return false;
+  }
+
+  function pathOf(url) {
+    const parsed = new URL(url, window.location.href);
+    let path = parsed.pathname;
+    if (path.length > 1 && path.charAt(path.length - 1) === "/") path = path.slice(0, -1);
+    return path;
+  }
+
+  function rememberBoardCard() {
+    if (!history.state || !history.state.fizzy || !boardRoot()) return;
+    const card = selectedCard();
+    const number = card && card.dataset.number ? Number(card.dataset.number) : null;
+    if (history.state.card === number) return;
+    history.replaceState(Object.assign({}, history.state, { card: number }), "", window.location.href);
+  }
+
+  function bootSurface(selectNumber, hash) {
+    watchCardLists(document.getElementById("board-stage"));
+    watchCardLists(document.getElementById("cards_container"));
+    bindSurfaceFilters();
+    const root = document.getElementById("main");
+    paintBubbles(root);
+    rememberDescription(root);
+    if (boardRoot()) {
+      restoreColumns();
+      if (selectNumber) {
+        const card = document.querySelector('article.card[data-number="' + selectNumber + '"]');
+        if (card) {
+          const column = card.closest("section.cards");
+          if (column && column.classList.contains("is-collapsed")) showColumn(column, { select: false });
+          selectCard(card);
+        }
+      }
+      return;
+    }
+    if (hash === "#edit") {
+      setCardEditing(true);
+      return;
+    }
+    const editor = document.querySelector("[data-card-editor]");
+    if (editor && !editor.hidden) {
+      setCardEditing(true);
+      return;
+    }
+    chooseFallback();
+  }
+
+  function applyDocument(html, url, options) {
+    options = options || {};
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const nextMain = doc.getElementById("main");
+    const main = document.getElementById("main");
+    if (!nextMain || !main || !doc.body || doc.body.dataset.slug !== slug) return false;
+    document.querySelectorAll("dialog[open]").forEach(function (dialog) { dialog.close(); });
+    const flash = document.querySelector("#global-container > .flash");
+    if (flash) flash.remove();
+    const nextFlash = doc.querySelector("#global-container > .flash");
+    if (nextFlash && main.parentNode) main.parentNode.insertBefore(document.importNode(nextFlash, true), main);
+    main.replaceWith(document.importNode(nextMain, true));
+    const header = document.getElementById("header");
+    const nextHeader = doc.getElementById("header");
+    if (header && nextHeader) header.className = nextHeader.className;
+    [".header__actions--start", ".header__title", ".header__actions--end"].forEach(function (selector) {
+      const dest = document.querySelector(selector);
+      const src = doc.querySelector(selector);
+      if (dest) dest.innerHTML = src ? src.innerHTML : "";
+    });
+    document.body.className = doc.body.className;
+    if (doc.title) document.title = doc.title;
+    invalidateLists();
+    selectedNode = null;
+    selectedColumn = null;
+    dialogOpen = !!document.querySelector("dialog[open]");
+    let hash = "";
+    try { hash = new URL(url, window.location.href).hash; } catch (error) { hash = ""; }
+    if (options.push !== false) {
+      const prev = history.state && history.state.fizzy ? history.state : { fizzy: true, depth: 0 };
+      history.pushState({
+        fizzy: true,
+        depth: (prev.depth || 0) + 1,
+        returnTo: window.location.pathname + window.location.search,
+        card: options.restoreCard || null,
+      }, "", url);
+    }
+    bootSurface(options.restoreCard, hash);
+    window.scrollTo(0, 0);
+    return true;
+  }
+
+  function showPage(url, options) {
+    options = options || {};
+    const token = ++navToken;
+    let requested;
+    try { requested = new URL(url, window.location.href); }
+    catch (error) {
+      window.location.assign(url);
+      return Promise.resolve(null);
+    }
+    return fetch(requested.href, {
+      headers: { Accept: "text/html" },
+      credentials: "same-origin",
+    }).then(function (response) {
+      if (token !== navToken) return null;
+      if (!response.ok) {
+        window.location.assign(requested.href);
+        return null;
+      }
+      return response.text().then(function (html) {
+        if (token !== navToken) return null;
+        const finalUrl = new URL(response.url || requested.href, window.location.href);
+        if (requested.hash) finalUrl.hash = requested.hash;
+        const display = finalUrl.pathname + finalUrl.search + finalUrl.hash;
+        if (!applyDocument(html, display, options)) window.location.assign(finalUrl.href);
+        return true;
+      });
+    }).catch(function () {
+      if (token === navToken) window.location.assign(requested.href);
+    });
+  }
+
+  function openSurface(url, options) {
+    options = options || {};
+    const target = new URL(url, window.location.href);
+    const state = history.state;
+    // Returning to the board we just left should pop, so the stack stays board then card.
+    if (!options.force && state && state.fizzy && state.depth > 0 && state.returnTo && pathOf(state.returnTo) === pathOf(target.href) && pathOf(target.href) !== pathOf(window.location.href)) {
+      history.back();
+      return Promise.resolve(true);
+    }
+    if (boardRoot()) rememberBoardCard();
+    return showPage(target.pathname + target.search + target.hash, options);
+  }
+
+  document.addEventListener("click", function (event) {
+    if (event.defaultPrevented || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target && event.target.closest && event.target.closest("a[href]");
+    if (!link || link.hasAttribute("download")) return;
+    if (link.target && link.target !== "_self") return;
+    if (!surfaceUrl(link.href)) return;
+    const next = new URL(link.href, window.location.href);
+    if (next.pathname === window.location.pathname && next.search === window.location.search && next.hash === window.location.hash) {
+      event.preventDefault();
+      document.querySelectorAll("dialog[open]").forEach(function (dialog) { dialog.close(); });
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const number = (window.location.pathname.match(/\/cards\/(\d+)\/?$/) || [])[1];
+    const back = link.hasAttribute("data-back");
+    openSurface(link.href, back && number ? { restoreCard: number } : null);
+  }, true);
 
   function formOf(node) {
     return node.closest("form");
@@ -645,15 +830,9 @@
     new MutationObserver(invalidateLists).observe(root, { childList: true, subtree: true });
   }
 
-  watchCardLists(document.getElementById("board-stage"));
-  watchCardLists(document.getElementById("cards_container"));
-
-  if (boardRoot()) {
-    restoreColumns();
-    desktopQuery.addEventListener("change", restoreColumns);
-  } else {
-    chooseFallback();
-  }
+  desktopQuery.addEventListener("change", function () {
+    if (boardRoot()) restoreColumns();
+  });
 
   function setCardEditing(on) {
     const display = document.querySelector("[data-card-display]");
@@ -671,6 +850,9 @@
         title.focus();
         if (title.select) title.select();
       }
+    } else {
+      const active = document.activeElement;
+      if (active && editor.contains(active) && active.blur) active.blur();
     }
     return true;
   }
@@ -829,7 +1011,7 @@
     if (!card || !card.closest(".cards, .cards-grid, .card-grid")) return;
     if (event.target.closest("a, button, input, textarea, select, summary, form")) return;
     const link = card.querySelector(".card__link");
-    if (link) window.location.href = link.href;
+    if (link) link.click();
   });
 
   document.addEventListener("dragstart", function (event) {
@@ -859,15 +1041,8 @@
     event.preventDefault();
     column.classList.remove("drag-and-drop__hover-container");
     const number = event.dataTransfer.getData("text/plain");
-    if (!number || !slug) return;
-    let url = slug + "/cards/" + number + "/triage";
-    const fields = {};
-    if (column.dataset.columnId) fields.column_id = column.dataset.columnId;
-    else if (column.dataset.lane === "maybe") fields._method = "delete";
-    else if (column.dataset.lane === "not_now") url = slug + "/cards/" + number + "/not_now";
-    else if (column.dataset.lane === "closed") url = slug + "/cards/" + number + "/closure";
-    else return;
-    post(url, fields);
+    const move = columnMoveFields(column, number);
+    if (move) post(move.url, move.fields);
   });
 
   const bar = document.querySelector(".bar");
@@ -945,10 +1120,11 @@
     });
   }
 
-  const filterForm = document.querySelector(".board-filters");
   let filterGeneration = 0;
   function refreshBoard() {
-    if (!filterForm) return;
+    const filterForm = document.querySelector(".board-filters");
+    const stage = document.getElementById("board-stage");
+    if (!filterForm || !stage) return;
     const generation = ++filterGeneration;
     const params = new URLSearchParams(new FormData(filterForm));
     fetch(filterForm.action + "?" + params.toString(), {
@@ -958,20 +1134,24 @@
       return response.text();
     }).then(function (html) {
       if (generation !== filterGeneration) return;
-      const stage = document.getElementById("board-stage");
-      if (!stage) return;
-      stage.innerHTML = html;
+      const current = document.getElementById("board-stage");
+      if (!current || current !== stage) return;
+      current.innerHTML = html;
       invalidateLists();
       if (boardRoot()) restoreColumns();
       else chooseFallback();
-      paintBubbles(stage);
+      paintBubbles(current);
     });
   }
-  if (filterForm) {
-    filterForm.addEventListener("input", function (event) {
+
+  function bindSurfaceFilters() {
+    const form = document.querySelector(".board-filters");
+    if (!form || form.dataset.liveFilter) return;
+    form.dataset.liveFilter = "1";
+    form.addEventListener("input", function (event) {
       if (event.target && event.target.name === "q") refreshBoard();
     });
-    filterForm.addEventListener("change", function (event) {
+    form.addEventListener("change", function (event) {
       if (event.target && event.target.type === "checkbox") refreshBoard();
     });
   }
@@ -1099,6 +1279,27 @@
   document.addEventListener("submit", function (event) {
     const form = event.target;
     if (!form || form.classList.contains("danger") || form.hasAttribute("data-native-submit") || (form.getAttribute("method") || "").toLowerCase() === "dialog") return;
+    if (form.hasAttribute("data-add-card")) {
+      event.preventDefault();
+      event.stopPropagation();
+      const token = ++navToken;
+      if (boardRoot()) rememberBoardCard();
+      postForm(form, event.submitter, { Accept: "text/html" }).then(function (response) {
+        if (token !== navToken) return null;
+        if (!response.ok) {
+          window.alert("Could not add that card.");
+          return null;
+        }
+        return response.text().then(function (html) {
+          if (token !== navToken) return;
+          const finalUrl = response.url || form.action;
+          if (!applyDocument(html, finalUrl)) window.location.assign(finalUrl);
+        });
+      }).catch(function () {
+        if (token === navToken) window.alert("Could not add that card.");
+      });
+      return;
+    }
     const sheet = form.closest("#card-sheet");
     const adding = form.classList.contains("add-card");
     const columnForm = form.closest(".cards__menu, .cards__new, .cards__new-column");
@@ -1207,6 +1408,7 @@
 
   const KEYMAP = [
     ["h j k l", "Previous column, next card, previous card, next column. Arrows do the same."],
+    ["> <", "Move the selected card to the next or previous list. 3> jumps three lists."],
     ["gg", "First card in this column."],
     ["G", "Last card. 3G is the third card."],
     ["Enter", "Open the selected card."],
@@ -1414,7 +1616,58 @@
     }
     const card = selectedCard();
     const link = card && card.querySelector(".card__link");
-    if (link) window.location.href = link.href.split("#")[0] + "#edit";
+    if (link) openSurface(link.href.split("#")[0] + "#edit");
+  }
+
+  function moveLists() {
+    return columns().filter(function (column) {
+      return column.dataset.columnId || column.dataset.lane;
+    });
+  }
+
+  function moveSelectedTo(direction) {
+    const steps = Math.max(1, takeCount());
+    const sign = direction < 0 ? -1 : 1;
+    if (onCardPage()) {
+      const buttons = Array.from(document.querySelectorAll("#card-sheet .card__stages button"));
+      if (!buttons.length) return;
+      let index = buttons.findIndex(function (button) {
+        return button.disabled || button.classList.contains("card__column-name--current");
+      });
+      if (index < 0) index = 0;
+      const dest = Math.max(0, Math.min(buttons.length - 1, index + sign * steps));
+      if (dest === index) return;
+      const button = buttons[dest];
+      if (button.form && button.form.requestSubmit) button.form.requestSubmit(button);
+      else button.click();
+      return;
+    }
+    if (movingCard) return;
+    const list = moveLists();
+    const card = selectedCard();
+    if (!list.length || !card) return;
+    const current = card.closest("section.cards");
+    const index = list.indexOf(current);
+    if (index < 0) return;
+    const destIndex = Math.max(0, Math.min(list.length - 1, index + sign * steps));
+    if (destIndex === index) return;
+    const move = columnMoveFields(list[destIndex], card.dataset.number);
+    if (!move) return;
+    movingCard = true;
+    holdSelection = true;
+    post(move.url, move.fields).then(function (payload) {
+      holdSelection = false;
+      const fresh = payload && document.querySelector('article.card[data-number="' + payload.number + '"]');
+      const home = fresh && fresh.closest("section.cards");
+      if (home && home.classList.contains("is-collapsed")) showColumn(home, { select: false });
+      if (fresh && fresh.isConnected) selectCard(fresh);
+      else chooseFallback();
+    }).catch(function () {
+      holdSelection = false;
+      chooseFallback();
+    }).then(function () {
+      movingCard = false;
+    });
   }
 
   function showSearchHit(direction) {
@@ -1585,7 +1838,7 @@
         const chosen = barResults && barResults.querySelector(".search__result[aria-selected='true']");
         if (chosen) {
           event.preventDefault();
-          window.location.href = chosen.href;
+          chosen.click();
           return;
         }
       }
@@ -1708,8 +1961,17 @@
       if (link) {
         event.preventDefault();
         dropCount();
-        window.location.href = link.href;
+        link.click();
       }
+      return;
+    }
+    if (!meta && !event.altKey && (key === ">" || key === "<")) {
+      event.preventDefault();
+      if (event.repeat) {
+        dropCount();
+        return;
+      }
+      moveSelectedTo(key === ">" ? 1 : -1);
       return;
     }
     if (plain && key === "/") {
@@ -1744,11 +2006,19 @@
     });
   });
 
-  if (window.location.hash === "#edit") setCardEditing(true);
-  else {
-    const editor = document.querySelector("[data-card-editor]");
-    if (editor && !editor.hidden) setCardEditing(true);
+  if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+  if (!history.state || !history.state.fizzy) {
+    history.replaceState({ fizzy: true, depth: 0 }, "", window.location.href);
   }
+  window.addEventListener("popstate", function (event) {
+    const state = event.state;
+    if (!state || !state.fizzy) return;
+    showPage(window.location.pathname + window.location.search + window.location.hash, {
+      push: false,
+      restoreCard: state.card || null,
+    });
+  });
+  bootSurface(history.state && history.state.card, window.location.hash);
 
   document.documentElement.dataset.fizzyReady = "1";
 })();
