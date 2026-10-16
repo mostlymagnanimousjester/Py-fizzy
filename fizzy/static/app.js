@@ -10,13 +10,37 @@
     return !!target.closest("input, textarea, select, [contenteditable]");
   }
 
+  let boardNode = null;
+  let boardFresh = false;
+  let columnList = null;
+  let columnRoot = null;
+  let listGeneration = 0;
+  const cardCache = new WeakMap();
+
+  function invalidateLists() {
+    listGeneration += 1;
+    boardFresh = false;
+    columnList = null;
+    columnRoot = null;
+  }
+
   function boardRoot() {
-    return document.querySelector(".card-columns");
+    if (boardFresh && boardNode && boardNode.isConnected) return boardNode;
+    if (boardFresh && !boardNode) return null;
+    boardNode = document.querySelector(".card-columns");
+    boardFresh = true;
+    return boardNode;
   }
 
   function columns() {
     const root = boardRoot();
-    return root ? Array.from(root.querySelectorAll("section.cards")) : [];
+    if (!root) return [];
+    if (columnList && columnRoot === root) return columnList;
+    const nodes = root.querySelectorAll("section.cards");
+    columnList = [];
+    for (let index = 0; index < nodes.length; index += 1) columnList.push(nodes[index]);
+    columnRoot = root;
+    return columnList;
   }
 
   function isDesktop() {
@@ -47,6 +71,11 @@
 
   function collectCards(root) {
     if (!root) return [];
+    const section = root.tagName === "SECTION";
+    if (section) {
+      const hit = cardCache.get(root);
+      if (hit && hit.generation === listGeneration) return hit.cards;
+    }
     const list = root.classList.contains("cards__list") || root.classList.contains("card-grid")
       ? root
       : root.querySelector(".cards__list, .card-grid");
@@ -56,6 +85,7 @@
     for (let index = 0; index < nodes.length; index += 1) {
       if (nodes[index].tagName === "ARTICLE") cards.push(nodes[index]);
     }
+    if (section) cardCache.set(root, { generation: listGeneration, cards: cards });
     return cards;
   }
 
@@ -67,8 +97,50 @@
   let cardIndexMemory = 0;
   let selectedNode = null;
   let selectedColumn = null;
+  let revealFrame = 0;
+  let revealTarget = null;
 
-  function selectCard(card) {
+  function cancelReveal() {
+    if (!revealFrame) return;
+    cancelAnimationFrame(revealFrame);
+    revealFrame = 0;
+    revealTarget = null;
+  }
+
+  function inside(box, frame) {
+    return box.top >= frame.top - 1 && box.bottom <= frame.bottom + 1 && box.left >= frame.left - 1 && box.right <= frame.right + 1;
+  }
+
+  function cardInView(card) {
+    const box = card.getBoundingClientRect();
+    if (box.width === 0 || box.height === 0) return false;
+    const list = card.closest(".cards__list, .card-grid");
+    if (list && !inside(box, list.getBoundingClientRect())) return false;
+    const band = card.closest(".card-columns");
+    if (band && !inside(box, band.getBoundingClientRect())) return false;
+    return box.top >= 0 && box.left >= 0 && box.bottom <= window.innerHeight && box.right <= window.innerWidth;
+  }
+
+  function revealCard(card) {
+    if (!card || !card.isConnected) return;
+    const active = document.activeElement;
+    const field = active && active.closest && active.closest("input, textarea, select, [contenteditable]");
+    if (!field && active !== card) card.focus({ preventScroll: true });
+    if (!cardInView(card)) card.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  function scheduleReveal(card) {
+    revealTarget = card;
+    if (revealFrame) return;
+    revealFrame = requestAnimationFrame(function () {
+      revealFrame = 0;
+      const target = revealTarget;
+      revealTarget = null;
+      revealCard(target);
+    });
+  }
+
+  function selectCard(card, index, coarse) {
     if (selectedNode && selectedNode !== card) {
       if (selectedNode.isConnected) selectedNode.removeAttribute("aria-selected");
       else {
@@ -78,14 +150,16 @@
     }
     if (!card) {
       selectedNode = null;
+      cancelReveal();
       return;
     }
     const column = card.closest("section.cards");
-    if (column) {
+    if (typeof index === "number" && index >= 0) cardIndexMemory = index;
+    else if (column) {
       const siblings = collectCards(column);
-      for (let index = 0; index < siblings.length; index += 1) {
-        if (siblings[index] === card) {
-          cardIndexMemory = index;
+      for (let cursor = 0; cursor < siblings.length; cursor += 1) {
+        if (siblings[cursor] === card) {
+          cardIndexMemory = cursor;
           break;
         }
       }
@@ -105,10 +179,11 @@
     }
     card.setAttribute("aria-selected", "true");
     selectedNode = card;
-    const active = document.activeElement;
-    const field = active && active.closest && active.closest("input, textarea, select, [contenteditable]");
-    if (!field && active !== card) card.focus({ preventScroll: true });
-    card.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (coarse) scheduleReveal(card);
+    else {
+      cancelReveal();
+      revealCard(card);
+    }
   }
 
   function selectFirstMaybe() {
@@ -213,7 +288,7 @@
     return collectCards(gridElement());
   }
 
-  function moveColumn(direction) {
+  function moveColumn(direction, coarse) {
     const list = columns();
     if (!list.length) return false;
     const sign = direction < 0 ? -1 : 1;
@@ -230,7 +305,7 @@
     const dest = list[destIndex];
     if (dest.classList.contains("is-collapsed")) showColumn(dest, { select: false });
     const cards = visibleCards(dest);
-    if (cards.length) selectCard(cards[Math.min(cardIndex, cards.length - 1)]);
+    if (cards.length) selectCard(cards[Math.min(cardIndex, cards.length - 1)], Math.min(cardIndex, cards.length - 1), coarse);
     else {
       selectCard(null);
       dest.focus();
@@ -238,17 +313,17 @@
     return true;
   }
 
-  function moveCard(direction) {
+  function moveCard(direction, coarse) {
     const cards = listedCards();
     if (!cards.length) return false;
     const sign = direction < 0 ? -1 : 1;
     const steps = Math.max(1, Math.abs(direction));
     const current = selectedCard();
-    let index = cards.indexOf(current);
+    let index = current && cards[cardIndexMemory] === current ? cardIndexMemory : cards.indexOf(current);
     if (index < 0) index = sign > 0 ? -1 : cards.length;
     const dest = Math.max(0, Math.min(cards.length - 1, index + sign * steps));
     if (cards[dest] === current) return false;
-    selectCard(cards[dest]);
+    selectCard(cards[dest], dest, coarse);
     return true;
   }
 
@@ -335,6 +410,7 @@
   }
 
   function placeCard(payload) {
+    invalidateLists();
     const template = document.createElement("template");
     template.innerHTML = (payload.html || "").trim();
     const fresh = template.content.querySelector("article.card");
@@ -562,6 +638,15 @@
     if (column && column.classList.contains("is-collapsed")) return;
     selectCard(card);
   });
+
+  function watchCardLists(root) {
+    if (!root || root.dataset.listWatch) return;
+    root.dataset.listWatch = "1";
+    new MutationObserver(invalidateLists).observe(root, { childList: true, subtree: true });
+  }
+
+  watchCardLists(document.getElementById("board-stage"));
+  watchCardLists(document.getElementById("cards_container"));
 
   if (boardRoot()) {
     restoreColumns();
@@ -876,6 +961,7 @@
       const stage = document.getElementById("board-stage");
       if (!stage) return;
       stage.innerHTML = html;
+      invalidateLists();
       if (boardRoot()) restoreColumns();
       else chooseFallback();
       paintBubbles(stage);
@@ -967,6 +1053,7 @@
     const stage = document.getElementById("board-stage");
     if (!stage) return;
     stage.innerHTML = html;
+    invalidateLists();
     if (boardRoot()) restoreColumns();
     else chooseFallback();
     paintBubbles(stage);
@@ -1038,6 +1125,7 @@
         const card = template.content.querySelector("article.card");
         if (!card) return;
         list.prepend(card);
+        invalidateLists();
         recount(column);
         paintBubble(card.querySelector(".bubble"));
         selectCard(card);
@@ -1386,22 +1474,22 @@
     }
   }
 
-  function moveMotion(key, steps) {
+  function moveMotion(key, steps, coarse) {
     if (key === "j" || key === "ArrowDown") {
-      if (!onCardPage()) moveCard(steps);
+      if (!onCardPage()) moveCard(steps, coarse);
       return;
     }
     if (key === "k" || key === "ArrowUp") {
-      if (!onCardPage()) moveCard(-steps);
+      if (!onCardPage()) moveCard(-steps, coarse);
       return;
     }
     if (key === "h" || key === "ArrowLeft") {
-      if (columns().length) moveColumn(-steps);
+      if (columns().length) moveColumn(-steps, coarse);
       else if (steps === 1) goBack();
       return;
     }
     if (key === "l" || key === "ArrowRight") {
-      if (columns().length) moveColumn(steps);
+      if (columns().length) moveColumn(steps, coarse);
     }
   }
 
@@ -1409,6 +1497,14 @@
     const key = event.key;
     const meta = event.metaKey || event.ctrlKey;
     const plain = !meta && !event.altKey && !event.shiftKey;
+    if (event.repeat && plain && !pending && !dialogOpen && !typing(event) && (
+      key === "j" || key === "k" || key === "h" || key === "l" ||
+      key === "ArrowDown" || key === "ArrowUp" || key === "ArrowLeft" || key === "ArrowRight"
+    )) {
+      event.preventDefault();
+      moveMotion(key, 1, true);
+      return;
+    }
     const jump = dialogById("jump");
 
     if (event.target.matches && event.target.matches("[name='card[title]']") && key === "Enter" && plain) {
