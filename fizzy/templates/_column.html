@@ -3,7 +3,7 @@
   data-card-count="{{ cards|length }}"
   data-column-name="{{ title }}"
   {% if lane %}data-lane="{{ lane }}"{% endif %}
-  {% if column %}data-column-id="{{ column.id }}" id="column-{{ column.id }}"{% elif lane %}id="lane-{{ lane }}"{% endif %}
+  {% if column %}data-column-id="{{ column.id }}" id="column-{{ column.id }}"{% elif lane == "maybe" %}id="maybe"{% elif lane == "not_now" %}id="not-now"{% elif lane == "closed" %}id="closed-cards"{% endif %}
   {% if lane == 'maybe' %}aria-selected="true"{% endif %}
   tabindex="0">
   <div class="cards__transition-container">
@@ -11,9 +11,48 @@
       {% if column and current_user and not public_key %}
       <div class="cards__menu">
         <button type="button" class="btn btn--circle txt-x-small borderless" aria-label="Column options">
-          <span class="icon icon--menu-dots-horizontal"></span>
+          <span class="icon icon--menu-dots-horizontal translucent"></span>
+          <span class="for-screen-reader">Column options</span>
         </button>
-        <dialog class="popup popup--align-right panel flex-column gap fill-white shadow txt-small">
+        <dialog class="popup popup--align-right panel flex-column gap fill-white shadow txt-small margin-block-double">
+          <ul class="popup__list">
+            <li class="popup__item">
+              <button type="button" class="popup__btn btn" data-column-edit>
+                <span class="icon icon--pencil"></span>
+                <span>Edit column</span>
+              </button>
+            </li>
+            <li class="popup__item">
+              <form method="post" action="{{ slug }}/columns/{{ column.id }}/move" class="display-contents">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="popup__btn btn" name="direction" value="left" type="submit" {% if leftmost %}disabled{% endif %}>
+                  <span class="icon icon--column-left"></span>
+                  <span>Move to the left</span>
+                </button>
+              </form>
+            </li>
+            <li class="popup__item">
+              <form method="post" action="{{ slug }}/columns/{{ column.id }}/move" class="display-contents">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="popup__btn btn" name="direction" value="right" type="submit" {% if rightmost %}disabled{% endif %}>
+                  <span class="icon icon--column-right"></span>
+                  <span>Move to the right</span>
+                </button>
+              </form>
+            </li>
+            <li class="popup__item">
+              <form method="post" action="{{ slug }}/boards/{{ column.board_id }}/columns/{{ column.id }}" class="display-contents danger">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="_method" value="delete">
+                <button type="submit" class="popup__btn btn txt-negative">
+                  <span class="icon icon--trash"></span>
+                  <span>Delete column</span>
+                </button>
+              </form>
+            </li>
+          </ul>
+        </dialog>
+        <dialog class="popup panel flex-column gap-half fill-white shadow txt-small margin-block-double" data-column-form>
           <form method="post" action="{{ slug }}/boards/{{ column.board_id }}/columns/{{ column.id }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="_method" value="put">
@@ -29,26 +68,19 @@
             </div>
             <button type="submit" class="btn btn--link">Save changes</button>
           </form>
-          <form method="post" action="{{ slug }}/columns/{{ column.id }}/move">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="popup__btn btn" name="direction" value="left" type="submit"><span class="icon icon--column-left"></span> Move to the left</button>
-            <button class="popup__btn btn" name="direction" value="right" type="submit"><span class="icon icon--column-right"></span> Move to the right</button>
-          </form>
-          <form method="post" action="{{ slug }}/boards/{{ column.board_id }}/columns/{{ column.id }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="_method" value="delete">
-            <button type="submit" class="popup__btn btn">Delete column</button>
-          </form>
         </dialog>
       </div>
       {% else %}
       <span></span>
       {% endif %}
-      <button type="button" class="cards__expander btn btn--plain" aria-expanded="{{ 'false' if collapsed else 'true' }}" {% if lane == 'maybe' %}disabled{% endif %}>
+      <button type="button" class="cards__expander btn btn--plain" aria-expanded="{{ 'false' if collapsed else 'true' }}">
         <span class="cards__expander-count">{{ cards|length if cards|length < 100 else "99+" }}</span>
         <h2 class="cards__expander-title">{{ title }} <span class="icon icon--collapse"></span></h2>
       </button>
-      <span class="cards__maximize-button"></span>
+      <button type="button" class="cards__maximize-button btn btn--circle txt-x-small borderless" aria-label="Expand column">
+        <span class="icon icon--grid translucent"></span>
+        <span class="for-screen-reader">Expand column</span>
+      </button>
     </header>
     {% if lane == 'maybe' and current_user and not public_key %}
       {% include "_add_card.html" %}

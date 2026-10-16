@@ -1,4 +1,4 @@
-<article class="card{% if view.golden %} golden-effect{% endif %}{% if view.closed %} is-closed{% endif %}{% if view.postponed %} is-postponed{% endif %}"
+<article class="card{% if view.golden %} golden-effect{% endif %}{% if view.postponed %} card--postponed{% endif %}{% if not view.closed and not view.postponed %} card--active{% endif %}"
   style="--card-color: {{ view.color }}"
   draggable="{% if current_user and not public_key %}true{% else %}false{% endif %}"
   tabindex="0"
@@ -17,20 +17,20 @@
       </div>
       {% if view.tags %}
       <div class="card__tags">
-        <span class="icon icon--tag-outline"></span>
+        <span class="icon icon--tag-outline translucent"></span>
         <div class="min-width overflow-ellipsis">
-          {% for tag in view.tags %}<span class="card__tag">{{ tag.title }}{% if not loop.last %},{% endif %}</span>{% endfor %}
+          {% for tag in view.tags %}<span class="card__tag btn btn--plain overflow-ellipsis">{{ tag.title }}{% if not loop.last %},{% endif %}</span>{% endfor %}
         </div>
       </div>
       {% endif %}
       {% if view.step_total %}
-      <div class="card__steps align-center gap-half">
+      <div class="card__steps align-center gap-half flex-item-justify-end flex-item-no-shrink">
         <span class="steps__icon"><span class="icon icon--check"></span></span>
         <strong>{{ view.step_done }}/{{ view.step_total }}</strong>
       </div>
       {% endif %}
       {% if view.column and not view.closed and not view.postponed %}
-      <span class="btn card__column-name card__column-name--current txt-uppercase min-width max-width"><span class="overflow-ellipsis">{{ view.column.name }}</span></span>
+      <span class="btn justify-start card__column-name card__column-name--current txt-uppercase min-width max-width"><span class="overflow-ellipsis">{{ view.column.name }}</span></span>
       {% endif %}
     </header>
     <div class="card__body justify-space-between">
@@ -56,20 +56,19 @@
   <footer class="card__footer flex gap-half">
     <div class="card__meta">
       <div class="card__meta-avatars card__meta-avatars--author">
-        {% if view.creator %}<span class="avatar txt-x-small" title="{{ view.creator.name }}">{{ view.creator.name[:1] }}</span>{% endif %}
+        {% if view.creator %}{% with person=view.creator, linked=false %}{% include "_avatar.html" %}{% endwith %}{% endif %}
       </div>
       <span class="card__meta-text card__meta-text--added">added {{ view.added_ago }}</span>
-      {% if view.creator %}<span class="card__meta-text card__meta-text--author">{{ view.creator.name }}</span>{% endif %}
-      {% if view.active_ago %}
-      <span class="card__meta-text card__meta-text--updated overflow-ellipsis">updated {{ view.active_ago }}</span>
-      {% endif %}
-      {% if view.assignees %}
-      <span class="card__meta-text card__meta-text--assignees overflow-ellipsis">→ {{ view.assignees|map(attribute='name')|join(' / ') }}</span>
-      {% endif %}
+      <span class="card__meta-text card__meta-text--author">{{ view.creator.name if view.creator else "" }}</span>
+      <span class="card__meta-text card__meta-text--updated overflow-ellipsis"><span class="icon icon--refresh--meta" aria-label="Last updated"></span>{{ view.active_ago }}</span>
+      <span class="card__meta-text card__meta-text--assignees overflow-ellipsis">{% if view.assignees %}<span class="icon icon--arrow-right" aria-label="Assigned to"></span>{{ view.assignees|map(attribute='name')|join(' / ') }}{% endif %}</span>
+      <div class="card__meta-avatars card__meta-avatars--assignees">
+        {% for person in view.assignees %}{% with linked=false %}{% include "_avatar.html" %}{% endwith %}{% endfor %}
+      </div>
     </div>
     <div class="card__counts">
-      {% if view.reaction_count %}<span class="card__boosts"><span class="icon icon--boost"></span>{{ view.reaction_count }}</span>{% endif %}
-      {% if view.comment_count %}<span class="card__comments"><span class="icon icon--comment"></span>{{ view.comment_count }}</span>{% endif %}
+      {% if view.reaction_count %}<div class="card__boosts"><img src="{{ url_for('static', filename='vendor/boost-color.svg') }}" alt="" aria-hidden="true"><span>{{ view.reaction_count }}</span></div>{% endif %}
+      {% if view.comment_count %}<div class="card__comments"><span class="icon icon--comment"></span><span>{{ view.comment_count }}</span></div>{% endif %}
     </div>
     {% if view.image %}
     <div class="card__background"><img alt="" src="{{ slug }}/storage/{{ view.image.id }}"></div>

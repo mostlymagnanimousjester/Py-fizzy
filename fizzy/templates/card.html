@@ -1,9 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ view.card.title or "Card" }} · Fizzy{% endblock %}
-{% block header_title %}{{ view.card.title or 'Card' }}{% endblock %}
-{% block header_end %}
-  <a class="btn" data-back href="{{ slug }}/boards/{{ board.id }}">{{ board.name }}</a>
+{% block header_class %}header--card{% endblock %}
+{% block header_start %}
+  <a class="btn btn--back btn--circle-mobile" data-back href="{{ slug }}/boards/{{ board.id }}">
+    <span class="icon icon--arrow-left"></span>
+    <strong class="overflow-ellipsis">Back to {{ board.name }}</strong>
+    <kbd class="txt-x-small hide-on-touch">ESC</kbd>
+  </a>
 {% endblock %}
+{% block header_title %}{% endblock %}
 {% block body_class %}card-page{% endblock %}
 {% block body %}
 <div id="card-sheet">

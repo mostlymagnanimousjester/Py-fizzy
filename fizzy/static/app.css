@@ -23,14 +23,22 @@
   white-space: pre-wrap;
 }
 
-.card-field__title {
-  font-size: var(--text-x-large);
-  font-weight: 900;
+.card__description[contenteditable]:empty::before {
+  content: attr(data-placeholder);
+  opacity: 0.66;
+}
+
+button.card__title-link {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
   text-align: start;
 }
 
 .card__assign,
-.comments,
 .sheet,
 .gate {
   margin-inline: auto;
@@ -78,14 +86,6 @@
   align-self: start;
 }
 
-.comments {
-  display: flex;
-  flex-direction: column;
-  gap: var(--block-space);
-  margin-block: var(--block-space-double);
-  text-align: start;
-}
-
 .step__content.done {
   text-decoration: line-through;
   opacity: 0.6;
@@ -119,6 +119,6 @@
 }
 
 .cards__menu dialog[open],
-.cards__new dialog[open] {
+.cards__new-column dialog[open] {
   display: flex;
 }

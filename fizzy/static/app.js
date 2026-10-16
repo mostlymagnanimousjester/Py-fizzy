@@ -29,18 +29,18 @@
   }
 
   function setExpanded(column, on) {
-    if (column.id === "lane-maybe" && isDesktop()) on = true;
+    if (column.id === "maybe" && isDesktop()) on = true;
     column.classList.toggle("is-expanded", on);
     column.classList.toggle("is-collapsed", !on);
     const button = column.querySelector(".cards__expander");
     if (button) {
       button.setAttribute("aria-expanded", on ? "true" : "false");
-      button.disabled = column.id === "lane-maybe" && isDesktop();
+      button.disabled = column.id === "maybe" && isDesktop();
     }
   }
 
   function remember(column, on) {
-    if (!column.id || column.id === "lane-maybe") return;
+    if (!column.id || column.id === "maybe") return;
     if (on) localStorage.setItem(storageKey(column), "true");
     else localStorage.removeItem(storageKey(column));
   }
@@ -70,7 +70,7 @@
     if (!column) return;
     if (isDesktop()) {
       columns().forEach(function (item) {
-        if (item.id === "lane-maybe") setExpanded(item, true);
+        if (item.id === "maybe") setExpanded(item, true);
         else if (item !== column) {
           setExpanded(item, false);
           remember(item, false);
@@ -99,7 +99,7 @@
     remember(column, false);
     const current = selectedCard();
     if (current && column.contains(current)) {
-      const maybe = document.getElementById("lane-maybe");
+      const maybe = document.getElementById("maybe");
       const cards = visibleCards(maybe);
       if (cards.length) selectCard(cards[0]);
     }
@@ -109,16 +109,16 @@
     const root = boardRoot();
     if (!root) return;
     const saved = columns().filter(function (column) {
-      return column.id !== "lane-maybe" && localStorage.getItem(storageKey(column));
+      return column.id !== "maybe" && localStorage.getItem(storageKey(column));
     });
     columns().forEach(function (column) {
-      setExpanded(column, column.id === "lane-maybe");
+      setExpanded(column, column.id === "maybe");
     });
     if (isDesktop()) {
       const last = saved[saved.length - 1];
       if (last) showColumn(last);
       else {
-        const maybe = document.getElementById("lane-maybe");
+        const maybe = document.getElementById("maybe");
         const cards = visibleCards(maybe);
         if (cards.length) selectCard(cards[0]);
       }
@@ -126,7 +126,7 @@
     }
     if (saved.length) showColumn(saved[saved.length - 1]);
     else {
-      const maybe = document.getElementById("lane-maybe");
+      const maybe = document.getElementById("maybe");
       if (maybe) showColumn(maybe);
     }
   }
@@ -316,6 +316,98 @@
     });
   }
 
+  function formOf(node) {
+    return node.closest("form");
+  }
+
+  function hiddenFor(form, name, value) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name.endsWith("[]") ? name : name + "[]";
+    input.value = value;
+    input.setAttribute("data-filter-hidden", name.replace(/\[\]$/, ""));
+    input.setAttribute("data-filter-value", value);
+    return input;
+  }
+
+  function submitFilter(form) {
+    const typed = form.querySelector(".filter__terms");
+    if (typed && !typed.value.trim()) typed.disabled = true;
+    if (form.requestSubmit) form.requestSubmit();
+    else form.submit();
+  }
+
+  function applyFilterClick(event) {
+    const expand = event.target.closest("[data-filter-toggle-expand]");
+    if (expand) {
+      event.preventDefault();
+      const filters = expand.closest(".filters");
+      if (filters) {
+        const expanded = filters.classList.toggle("filters--expanded");
+        expand.classList.toggle("filter-toggle", !expanded);
+        expand.classList.toggle("btn--reversed", expanded);
+        if (expanded) expand.setAttribute("aria-selected", "true");
+        else expand.removeAttribute("aria-selected");
+      }
+      return true;
+    }
+    const opener = event.target.closest("[data-filter-open]");
+    if (opener) {
+      event.preventDefault();
+      const dialog = opener.parentElement.querySelector("dialog");
+      if (!dialog) return true;
+      const willOpen = !dialog.open;
+      document.querySelectorAll("dialog[open]").forEach(function (open) { open.close(); });
+      if (willOpen) dialog.show();
+      return true;
+    }
+    const remove = event.target.closest("[data-filter-remove]");
+    if (remove) {
+      event.preventDefault();
+      const form = formOf(remove);
+      form.querySelectorAll('[data-filter-hidden="' + remove.dataset.filterRemove + '"]').forEach(function (input) {
+        if (input.dataset.filterValue === remove.dataset.filterValue) input.remove();
+      });
+      submitFilter(form);
+      return true;
+    }
+    const set = event.target.closest("[data-filter-set]");
+    if (set) {
+      event.preventDefault();
+      const form = formOf(set);
+      const field = form.querySelector('[name="' + set.dataset.filterSet + '"]');
+      if (field) field.value = set.dataset.filterValue;
+      if (set.dataset.filterClear) {
+        form.querySelectorAll('[data-filter-hidden="' + set.dataset.filterClear + '"]').forEach(function (input) {
+          input.remove();
+        });
+        const cleared = form.querySelector('[name="' + set.dataset.filterClear + '"]');
+        if (cleared) cleared.value = "";
+      }
+      submitFilter(form);
+      return true;
+    }
+    const toggle = event.target.closest("[data-filter-toggle]");
+    if (toggle) {
+      event.preventDefault();
+      const form = formOf(toggle);
+      const name = toggle.dataset.filterToggle;
+      const value = toggle.dataset.filterValue;
+      const existing = Array.from(form.querySelectorAll('[data-filter-hidden="' + name + '"]')).find(function (input) {
+        return input.value === value;
+      });
+      if (existing) existing.remove();
+      else form.appendChild(hiddenFor(form, name, value));
+      if (toggle.dataset.filterClear) {
+        const cleared = form.querySelector('[name="' + toggle.dataset.filterClear + '"]');
+        if (cleared) cleared.value = "";
+      }
+      submitFilter(form);
+      return true;
+    }
+    return false;
+  }
+
   function clickHotkey(name) {
     const button = document.querySelector('[data-hotkey="' + name + '"]');
     if (button) button.click();
@@ -367,6 +459,47 @@
     desktopQuery.addEventListener("change", restoreColumns);
   }
 
+  function setCardEditing(on) {
+    const display = document.querySelector("[data-card-display]");
+    const editor = document.querySelector("[data-card-editor]");
+    if (!editor || !display) return false;
+    display.hidden = on;
+    editor.hidden = !on;
+    const actions = document.querySelector("[data-card-actions]");
+    const save = document.querySelector("[data-card-save]");
+    if (actions) actions.hidden = on;
+    if (save) save.hidden = !on;
+    if (on) {
+      const title = editor.querySelector("[name='card[title]']");
+      if (title) {
+        title.focus();
+        if (title.select) title.select();
+      }
+    }
+    return true;
+  }
+
+  function closeReactionForm(form) {
+    form.hidden = true;
+    form.classList.remove("expanded");
+    const reactions = form.closest(".reactions");
+    const trigger = reactions && reactions.querySelector("[data-reaction-open]");
+    if (trigger) trigger.hidden = false;
+    const field = form.querySelector("input");
+    if (field) field.value = "";
+  }
+
+  function openReactionForm(trigger) {
+    const reactions = trigger.closest(".reactions");
+    const form = reactions && reactions.querySelector("[data-reaction-form]");
+    if (!form) return;
+    trigger.hidden = true;
+    form.hidden = false;
+    form.classList.add("expanded");
+    const field = form.querySelector("input");
+    if (field) field.focus();
+  }
+
   document.addEventListener("click", function (event) {
     const jumpButton = event.target.closest("[data-hotkey='jump']");
     if (jumpButton) {
@@ -387,23 +520,112 @@
       openSearch();
       return;
     }
-    const menuButton = event.target.closest(".cards__menu > button, .cards__new-toggle");
+    const dialogClose = event.target.closest("[data-dialog-close]");
+    if (dialogClose) {
+      const dialog = dialogClose.closest("dialog");
+      if (dialog) dialog.close();
+      return;
+    }
+    const emoji = event.target.closest("[data-emoji]");
+    if (emoji) {
+      event.preventDefault();
+      const dialog = emoji.closest("dialog");
+      const form = dialog && dialog.closest("form");
+      const field = form && form.querySelector("input");
+      if (field) {
+        field.value = (field.value + emoji.dataset.emoji).slice(0, 16);
+        field.focus();
+      }
+      if (dialog) dialog.close();
+      return;
+    }
+    const reactionOpen = event.target.closest("[data-reaction-open]");
+    if (reactionOpen) {
+      event.preventDefault();
+      openReactionForm(reactionOpen);
+      return;
+    }
+    const reactionCancel = event.target.closest("[data-reaction-cancel]");
+    if (reactionCancel) {
+      event.preventDefault();
+      const form = reactionCancel.closest("[data-reaction-form]");
+      if (form) closeReactionForm(form);
+      return;
+    }
+    const reactionReveal = event.target.closest("[data-reaction-reveal]");
+    if (reactionReveal) {
+      const reaction = reactionReveal.closest(".reaction");
+      if (reaction) reaction.classList.toggle("expanded");
+      return;
+    }
+    const history = event.target.closest("[data-history-toggle]");
+    if (history) {
+      const comments = history.closest(".comments");
+      if (comments) comments.classList.toggle("comments--system-expanded");
+      return;
+    }
+    const cardEdit = event.target.closest("[data-card-edit]");
+    if (cardEdit) {
+      event.preventDefault();
+      setCardEditing(true);
+      return;
+    }
+    const editColumn = event.target.closest("[data-column-edit]");
+    if (editColumn) {
+      event.preventDefault();
+      const menu = editColumn.closest(".cards__menu");
+      if (menu) {
+        menu.querySelectorAll("dialog").forEach(function (open) { open.close(); });
+        const formDialog = menu.querySelector("[data-column-form]");
+        if (formDialog) {
+          formDialog.show();
+          const input = formDialog.querySelector("input[name='column[name]']");
+          if (input) input.focus();
+        }
+      }
+      return;
+    }
+    const menuButton = event.target.closest(".cards__menu > button, .cards__new-column > button");
     if (menuButton) {
       const dialog = menuButton.parentElement.querySelector("dialog");
       if (dialog) {
         event.preventDefault();
         if (dialog.open) dialog.close();
-        else dialog.show();
-        const input = dialog.querySelector("input[name='column[name]']");
-        if (input) input.focus();
+        else {
+          document.querySelectorAll("dialog[open]").forEach(function (open) { open.close(); });
+          dialog.show();
+        }
       }
       return;
     }
+    const maximize = event.target.closest(".cards__maximize-button");
+    if (maximize) {
+      event.preventDefault();
+      showColumn(maximize.closest("section.cards"));
+      return;
+    }
+    const dialogButton = event.target.closest("[data-dialog-open]");
+    if (dialogButton) {
+      event.preventDefault();
+      const dialog = dialogButton.parentElement.querySelector("dialog");
+      if (dialog) {
+        if (dialog.open) dialog.close();
+        else {
+          document.querySelectorAll("dialog[open]").forEach(function (open) { open.close(); });
+          if (dialogButton.closest("[data-dialog-modal]")) dialog.showModal();
+          else dialog.show();
+          const field = dialog.querySelector("input, textarea, select");
+          if (field) field.focus();
+        }
+      }
+      return;
+    }
+    if (applyFilterClick(event)) return;
     const expander = event.target.closest(".cards__expander");
     if (expander) {
       const column = expander.closest("section.cards");
-      if (!column || (column.id === "lane-maybe" && isDesktop())) return;
-      if (column.classList.contains("is-expanded") && column.id !== "lane-maybe") collapseSide(column);
+      if (!column || (column.id === "maybe" && isDesktop())) return;
+      if (column.classList.contains("is-expanded") && column.id !== "maybe") collapseSide(column);
       else showColumn(column);
       return;
     }
@@ -608,7 +830,10 @@
     const back = document.querySelector("[data-back]");
     if (back && payload.boardUrl) {
       back.setAttribute("href", payload.boardUrl);
-      back.textContent = payload.boardName || back.textContent;
+      const label = back.querySelector("strong");
+      const name = payload.boardName || "";
+      if (label) label.textContent = name ? "Back to " + name : label.textContent;
+      else if (name) back.textContent = name;
     }
     const tray = document.getElementById("pins-tray");
     if (tray && payload.pins) {
@@ -644,6 +869,25 @@
 
   rememberDescription(document);
 
+  document.addEventListener("change", function (event) {
+    const box = event.target.closest && event.target.closest(".step .checkbox");
+    if (!box || box.disabled || !box.form) return;
+    if (box.form.requestSubmit) box.form.requestSubmit();
+    else box.form.submit();
+  });
+
+  document.addEventListener("input", function (event) {
+    const field = event.target.closest && event.target.closest("[data-popup-filter]");
+    if (!field) return;
+    const dialog = field.closest("dialog");
+    if (!dialog) return;
+    const query = field.value.trim().toLowerCase();
+    dialog.querySelectorAll(".popup__item").forEach(function (item) {
+      const text = (item.textContent || "").toLowerCase();
+      item.hidden = !item.hasAttribute("data-popup-keep") && !!query && text.indexOf(query) === -1;
+    });
+  });
+
   document.addEventListener("focusout", function (event) {
     const form = event.target.closest && event.target.closest("form.card__edit");
     if (!form) return;
@@ -652,10 +896,10 @@
 
   document.addEventListener("submit", function (event) {
     const form = event.target;
-    if (!form || form.classList.contains("danger") || (form.getAttribute("method") || "").toLowerCase() === "dialog") return;
+    if (!form || form.classList.contains("danger") || form.hasAttribute("data-native-submit") || (form.getAttribute("method") || "").toLowerCase() === "dialog") return;
     const sheet = form.closest("#card-sheet");
     const adding = form.classList.contains("add-card");
-    const columnForm = form.closest(".cards__menu, .cards__new");
+    const columnForm = form.closest(".cards__menu, .cards__new, .cards__new-column");
     if (!sheet && !adding && !columnForm) return;
     event.preventDefault();
     event.stopPropagation();
@@ -774,6 +1018,18 @@
       const open = document.querySelector("dialog[open]");
       if (open) {
         open.close();
+        event.preventDefault();
+        return;
+      }
+      const reactionForm = event.target.closest && event.target.closest("[data-reaction-form]");
+      if (reactionForm && !reactionForm.hidden) {
+        closeReactionForm(reactionForm);
+        event.preventDefault();
+        return;
+      }
+      const editor = document.querySelector("[data-card-editor]");
+      if (editor && !editor.hidden && document.querySelector("[data-card-display]")) {
+        setCardEditing(false);
         event.preventDefault();
         return;
       }
@@ -966,19 +1222,21 @@
     }
     if (plain && (key === "e" || key === "E")) {
       const edit = document.querySelector('[data-hotkey-target="edit"]');
-      if (edit) {
+      if (edit && !edit.closest("[hidden]")) {
         event.preventDefault();
         edit.focus();
         if (edit.select) edit.select();
         return;
       }
-      if (clickHotkey("edit")) event.preventDefault();
+      if (clickHotkey("edit") || setCardEditing(true)) event.preventDefault();
       return;
     }
     if (plain && (key === "t" || key === "T")) {
       const tag = document.querySelector('[data-hotkey-target="tag"]');
       if (tag) {
         event.preventDefault();
+        const dialog = tag.closest("dialog");
+        if (dialog && !dialog.open) dialog.show();
         tag.focus();
       }
       return;
@@ -987,6 +1245,8 @@
       const assign = document.querySelector('[data-hotkey-target="assign"]');
       if (assign) {
         event.preventDefault();
+        const dialog = assign.closest("dialog");
+        if (dialog && !dialog.open) dialog.show();
         assign.focus();
       }
     }

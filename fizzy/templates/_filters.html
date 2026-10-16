@@ -1,0 +1,216 @@
+{% set indexed = filters.indexed_by or "all" %}
+{% set sorted = filters.sorted_by or "latest" %}
+{% set people = members|selectattr("active")|rejectattr("role", "equalto", "system")|list %}
+{% set status_labels = {
+  "all": "Open",
+  "closed": "Done",
+  "not_now": "Not Now",
+  "stalled": "Stalled",
+  "postponing_soon": "Closing soon",
+  "golden": "Golden"
+} %}
+{% set sort_labels = {
+  "latest": "Recently updated",
+  "newest": "Newest to oldest",
+  "oldest": "Oldest to newest"
+} %}
+{% set chosen_assignees = people|selectattr("id", "in", filters.assignee_ids)|list %}
+{% set chosen_creators = people|selectattr("id", "in", filters.creator_ids)|list %}
+{% set chosen_closers = people|selectattr("id", "in", filters.closer_ids)|list %}
+{% set chosen_tags = tags|selectattr("id", "in", filters.tag_ids)|list %}
+{% set chosen_boards = nav_boards|selectattr("id", "in", filters.board_ids)|list if not lock_board else [] %}
+<details class="expandable-on-native" open>
+  <summary class="btn btn--plain margin-block-end">Toggle filters</summary>
+  <aside class="filters margin-block-end{% if filters_active %} filters--has-filters-set{% endif %}">
+    <form method="get" action="{{ filter_url }}" class="display-contents">
+      {% if lock_board %}
+      <input type="hidden" name="board_ids[]" value="{{ board.id }}">
+      {% endif %}
+      <input type="hidden" name="indexed_by" value="{{ indexed }}">
+      <input type="hidden" name="sorted_by" value="{{ sorted }}">
+      <input type="hidden" name="assignment_status" value="{{ filters.assignment_status or '' }}">
+      {% for person_id in filters.assignee_ids %}
+      <input type="hidden" name="assignee_ids[]" value="{{ person_id }}" data-filter-hidden="assignee_ids">
+      {% endfor %}
+      {% for person_id in filters.creator_ids %}
+      <input type="hidden" name="creator_ids[]" value="{{ person_id }}" data-filter-hidden="creator_ids">
+      {% endfor %}
+      {% for person_id in filters.closer_ids %}
+      <input type="hidden" name="closer_ids[]" value="{{ person_id }}" data-filter-hidden="closer_ids">
+      {% endfor %}
+      {% for tag_id in filters.tag_ids %}
+      <input type="hidden" name="tag_ids[]" value="{{ tag_id }}" data-filter-hidden="tag_ids">
+      {% endfor %}
+      {% if not lock_board %}
+      {% for board_id in filters.board_ids %}
+      <input type="hidden" name="board_ids[]" value="{{ board_id }}" data-filter-hidden="board_ids">
+      {% endfor %}
+      {% endif %}
+
+      <input class="filter__terms input txt-x-small" name="terms[]" placeholder="Filter these cards… [F]" autocomplete="off" autocorrect="off" aria-label="Filter these cards" data-hotkey-target="filter" value="">
+      {% for term in filters.terms %}
+      <button type="button" class="btn txt-x-small btn--remove fill-selected flex-inline" data-filter-remove="terms" data-filter-value="{{ term }}">
+        <span>“{{ term }}”</span>
+        <span class="icon icon--close"></span>
+        <span class="for-screen-reader">Remove {{ term }}</span>
+      </button>
+      <input type="hidden" name="terms[]" value="{{ term }}" data-filter-hidden="terms" data-filter-value="{{ term }}">
+      {% endfor %}
+
+      {% if not lock_board %}
+      <div class="quick-filter" {% if chosen_boards %}data-filter-show="true"{% endif %}>
+        <button type="button" class="btn input input--select flex-inline txt-x-small" data-filter-open>
+          <span class="overflow-ellipsis">{% if chosen_boards %}{{ chosen_boards|map(attribute="name")|join(", ") }}{% else %}Boards…{% endif %}</span>
+        </button>
+        <dialog class="margin-block-start-half popup panel flex-column align-start gap-half fill-white shadow txt-small" aria-label="Boards">
+          <strong class="popup__title pad-inline-half">Boards…</strong>
+          <ul class="popup__list" role="listbox">
+            {% for item in nav_boards %}
+            <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if item.id in filters.board_ids else 'false' }}">
+              <button type="button" class="btn popup__btn" data-filter-toggle="board_ids" data-filter-value="{{ item.id }}">
+                <span class="overflow-ellipsis flex-item-grow">{{ item.name }}</span>
+                <span class="icon icon--check checked flex-item-justify-end"></span>
+              </button>
+            </li>
+            {% endfor %}
+          </ul>
+        </dialog>
+      </div>
+      {% endif %}
+
+      <div class="quick-filter{% if sorted == 'latest' %} quick-filter--with-default{% endif %}" {% if sorted != "latest" %}data-filter-show="true"{% endif %}>
+        <button type="button" class="btn input input--select flex-inline txt-x-small" data-filter-open>
+          <span class="overflow-ellipsis">{{ sort_labels.get(sorted, "Recently updated") }}</span>
+        </button>
+        <dialog class="margin-block-start-half popup panel flex-column align-start gap-half fill-white shadow txt-small" aria-label="Sort by">
+          <strong class="popup__title pad-inline-half">Sort by…</strong>
+          <ul class="popup__list" role="listbox">
+            {% for value, label in [("latest", "Recently updated"), ("newest", "Newest to oldest"), ("oldest", "Oldest to newest")] %}
+            <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if sorted == value else 'false' }}">
+              <button type="button" class="btn popup__btn" data-filter-set="sorted_by" data-filter-value="{{ value }}">
+                <span class="overflow-ellipsis flex-item-grow">{{ label }}</span>
+                <span class="icon icon--check checked flex-item-justify-end"></span>
+              </button>
+            </li>
+            {% endfor %}
+          </ul>
+        </dialog>
+      </div>
+
+      <div class="quick-filter{% if indexed == 'all' %} quick-filter--with-default{% endif %}" {% if indexed != "all" %}data-filter-show="true"{% endif %}>
+        <button type="button" class="btn input input--select flex-inline txt-x-small" data-filter-open>
+          <span class="overflow-ellipsis">{{ "Status…" if indexed == "all" else status_labels.get(indexed, indexed) }}</span>
+        </button>
+        <dialog class="margin-block-start-half popup panel flex-column align-start gap-half fill-white shadow txt-small" aria-label="Filter by status">
+          <strong class="popup__title pad-inline-half">Filter by status…</strong>
+          <ul class="popup__list" role="listbox">
+            {% for value, label in [("all", "Open"), ("closed", "Done"), ("not_now", "Not Now"), ("stalled", "Stalled"), ("postponing_soon", "Closing soon"), ("golden", "Golden")] %}
+            <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if indexed == value else 'false' }}">
+              <button type="button" class="btn popup__btn" data-filter-set="indexed_by" data-filter-value="{{ value }}">
+                <span class="overflow-ellipsis flex-item-grow">{{ label }}</span>
+                <span class="icon icon--check checked flex-item-justify-end"></span>
+              </button>
+            </li>
+            {% endfor %}
+          </ul>
+        </dialog>
+      </div>
+
+      {% if tags %}
+      <div class="quick-filter" {% if chosen_tags %}data-filter-show="true"{% endif %}>
+        <button type="button" class="btn input input--select flex-inline txt-x-small" data-filter-open>
+          <span class="overflow-ellipsis">{% if chosen_tags %}Tagged {{ chosen_tags|map(attribute="title")|join(", ") }}{% else %}Tagged…{% endif %}</span>
+        </button>
+        <dialog class="margin-block-start-half popup panel flex-column align-start gap-half fill-white shadow txt-small" aria-label="Tagged">
+          <strong class="popup__title pad-inline-half">Tagged…</strong>
+          <ul class="popup__list" role="listbox">
+            {% for tag in tags %}
+            <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if tag.id in filters.tag_ids else 'false' }}">
+              <button type="button" class="btn popup__btn" data-filter-toggle="tag_ids" data-filter-value="{{ tag.id }}">
+                <span class="overflow-ellipsis flex-item-grow">#{{ tag.title }}</span>
+                <span class="icon icon--check checked flex-item-justify-end"></span>
+              </button>
+            </li>
+            {% endfor %}
+          </ul>
+        </dialog>
+      </div>
+      {% endif %}
+
+      <div class="quick-filter" {% if chosen_assignees or filters.assignment_status == "unassigned" %}data-filter-show="true"{% endif %}>
+        <button type="button" class="btn input input--select flex-inline txt-x-small" data-filter-open>
+          <span class="overflow-ellipsis">{% if filters.assignment_status == "unassigned" %}Assigned to no one{% elif chosen_assignees %}Assigned to {{ chosen_assignees|map(attribute="name")|join(", ") }}{% else %}Assigned to…{% endif %}</span>
+        </button>
+        <dialog class="margin-block-start-half popup panel flex-column align-start gap-half fill-white shadow txt-small" aria-label="Assigned to">
+          <strong class="popup__title pad-inline-half">Assigned to…</strong>
+          <ul class="popup__list" role="listbox">
+            <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if filters.assignment_status == 'unassigned' else 'false' }}">
+              <button type="button" class="btn popup__btn" data-filter-set="assignment_status" data-filter-value="unassigned" data-filter-clear="assignee_ids">
+                <span class="overflow-ellipsis flex-item-grow">No one</span>
+                <span class="icon icon--check checked flex-item-justify-end"></span>
+              </button>
+            </li>
+            {% for person in people %}
+            <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if person.id in filters.assignee_ids else 'false' }}">
+              <button type="button" class="btn popup__btn" data-filter-toggle="assignee_ids" data-filter-value="{{ person.id }}" data-filter-clear="assignment_status">
+                <span class="overflow-ellipsis flex-item-grow">{{ person.name }}</span>
+                <span class="icon icon--check checked flex-item-justify-end"></span>
+              </button>
+            </li>
+            {% endfor %}
+          </ul>
+        </dialog>
+      </div>
+
+      <div class="quick-filter" {% if chosen_creators %}data-filter-show="true"{% endif %}>
+        <button type="button" class="btn input input--select flex-inline txt-x-small" data-filter-open>
+          <span class="overflow-ellipsis">{% if chosen_creators %}Added by {{ chosen_creators|map(attribute="name")|join(", ") }}{% else %}Added by…{% endif %}</span>
+        </button>
+        <dialog class="margin-block-start-half popup panel flex-column align-start gap-half fill-white shadow txt-small" aria-label="Added by">
+          <strong class="popup__title pad-inline-half">Added by…</strong>
+          <ul class="popup__list" role="listbox">
+            {% for person in people %}
+            <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if person.id in filters.creator_ids else 'false' }}">
+              <button type="button" class="btn popup__btn" data-filter-toggle="creator_ids" data-filter-value="{{ person.id }}">
+                <span class="overflow-ellipsis flex-item-grow">{{ person.name }}</span>
+                <span class="icon icon--check checked flex-item-justify-end"></span>
+              </button>
+            </li>
+            {% endfor %}
+          </ul>
+        </dialog>
+      </div>
+
+      <div class="quick-filter" {% if chosen_closers %}data-filter-show="true"{% endif %}>
+        <button type="button" class="btn input input--select flex-inline txt-x-small" data-filter-open>
+          <span class="overflow-ellipsis">{% if chosen_closers %}Done by {{ chosen_closers|map(attribute="name")|join(", ") }}{% else %}Done by…{% endif %}</span>
+        </button>
+        <dialog class="margin-block-start-half popup panel flex-column align-start gap-half fill-white shadow txt-small" aria-label="Done by">
+          <strong class="popup__title pad-inline-half">Done by…</strong>
+          <ul class="popup__list" role="listbox">
+            {% for person in people %}
+            <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if person.id in filters.closer_ids else 'false' }}">
+              <button type="button" class="btn popup__btn" data-filter-toggle="closer_ids" data-filter-value="{{ person.id }}">
+                <span class="overflow-ellipsis flex-item-grow">{{ person.name }}</span>
+                <span class="icon icon--check checked flex-item-justify-end"></span>
+              </button>
+            </li>
+            {% endfor %}
+          </ul>
+        </dialog>
+      </div>
+
+      <button type="button" class="btn txt-x-small filter-toggle" data-filter-toggle-expand aria-label="Filter options">
+        <span class="icon icon--filter"></span>
+        <span class="filters__show-when-expanded for-screen-reader">Collapse filter options</span>
+        <span class="filters__show-when-collapsed for-screen-reader">Expand filter options</span>
+      </button>
+    </form>
+    <div class="filters__manage gap-half">
+      <a class="btn btn--remove txt-x-small" href="{{ clear_url }}">
+        <span class="icon icon--close"></span>
+        <span class="for-screen-reader">Clear all</span>
+      </a>
+    </div>
+  </aside>
+</details>

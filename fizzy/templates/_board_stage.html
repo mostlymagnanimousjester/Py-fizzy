@@ -18,7 +18,7 @@
   {% endwith %}
   <div class="card-columns__right">
     {% for entry in columns %}
-      {% with lane="", title=entry.column.name, cards=entry.cards, collapsed=true, color=entry.column.color, column=entry.column %}
+      {% with lane="", title=entry.column.name, cards=entry.cards, collapsed=true, color=entry.column.color, column=entry.column, leftmost=loop.first, rightmost=loop.last %}
         {% include "_column.html" %}
       {% endwith %}
     {% endfor %}
@@ -26,8 +26,8 @@
       {% include "_column.html" %}
     {% endwith %}
     {% if current_user and not public_key %}
-    <div class="cards__new cards__new-column">
-      <button type="button" class="cards__new-toggle btn btn--circle btn--circle-mobile txt-x-small borderless" aria-label="Add a column">
+    <div class="cards__new-column">
+      <button type="button" class="btn btn--circle btn--circle-mobile txt-x-small borderless" aria-label="Add a column">
         <span class="icon icon--add"></span>
         <span class="for-screen-reader">New column</span>
       </button>

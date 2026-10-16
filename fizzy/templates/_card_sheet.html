@@ -1,5 +1,6 @@
 <section class="card-perma{% if view.golden %} golden-effect{% endif %}" style="--card-color: {{ view.color }}">
   <div class="card-perma__actions card-perma__actions--left">
+    {% if view.card.status == "published" and not view.closed %}
     <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/goldness">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% if view.golden %}<input type="hidden" name="_method" value="delete">{% endif %}
@@ -9,80 +10,165 @@
         <kbd>G</kbd>
       </button>
     </form>
+    {% endif %}
   </div>
   <div class="card-perma__bg">
-    <article class="card{% if view.golden %} golden-effect{% endif %}{% if view.closed %} is-closed{% endif %}{% if view.postponed %} is-postponed{% endif %}">
+    <article class="card{% if view.golden %} golden-effect{% endif %}{% if view.postponed %} card--postponed{% endif %}{% if not view.closed and not view.postponed %} card--active{% endif %}">
       {% if view.image %}
       <div class="card__background"><img alt="" src="{{ slug }}/storage/{{ view.image.id }}"></div>
       {% endif %}
       <header class="card__header">
-        <div class="card__board">
-          <span class="card__id">{{ view.card.number }}</span>
-          <a class="card__board-name" href="{{ slug }}/boards/{{ board.id }}"><span class="overflow-ellipsis">{{ board.name }}</span></a>
+        <div class="card__board" data-controller="dialog">
+          <div class="card__id"><span class="for-screen-reader">Card number</span>{{ view.card.number }}</div>
+          <div class="card__board-name">
+            <span class="overflow-ellipsis">{{ board.name }}</span>
+            {% if not view.closed %}<span class="icon icon--caret-down txt-xx-small"></span>{% endif %}
+          </div>
+          {% if not view.closed %}
+          <button type="button" class="card__board-picker-button btn btn--plain" data-dialog-open aria-label="Choose a board for this card"></button>
+          <dialog class="popup popup--align-right panel flex-column align-start gap-half fill-white shadow">
+            <strong class="popup__title">Move this card to…</strong>
+            <input type="search" class="input input--transparent txt-small margin-block-half" placeholder="Filter…" autocomplete="off" autocorrect="off" aria-label="Filter boards" data-popup-filter>
+            <ul class="popup__list">
+              {% for other in boards %}
+              <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if other.id == board.id else 'false' }}">
+                <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/board" class="max-width flex-item-grow">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="_method" value="put">
+                  <input type="hidden" name="board_id" value="{{ other.id }}">
+                  <button type="submit" class="popup__btn btn">
+                    <span class="overflow-ellipsis flex-item-grow">{{ other.name }}</span>
+                    <span class="icon icon--check checked flex-item-no-shrink flex-item-justify-end"></span>
+                  </button>
+                </form>
+              </li>
+              {% endfor %}
+            </ul>
+          </dialog>
+          {% endif %}
         </div>
         <div class="card__tags">
-          <span class="icon icon--tag-outline"></span>
-          {% for tag in view.tags %}<span class="card__tag">{{ tag.title }}</span>{% endfor %}
-          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/taggings" class="flex align-center gap-half">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input class="input" name="tag_title" placeholder="tag" aria-label="Tag" list="tag-list" data-hotkey-target="tag">
-            <button type="submit" class="btn" data-hotkey="tag">Tag <kbd>T</kbd></button>
-          </form>
-          <datalist id="tag-list">{% for tag in all_tags %}<option value="{{ tag.title }}">{% endfor %}</datalist>
+          {% if not view.closed %}
+          <div data-controller="dialog">
+            <button type="button" class="card__tag-picker-button btn btn--ensure-tap-target-size card__hide-on-index" style="--btn-background: var(--card-bg-color);" data-dialog-open aria-label="Add a tag">
+              <span class="icon icon--tag"></span>
+              <span class="for-screen-reader">Add a tag</span>
+            </button>
+            <dialog class="popup panel flex-column align-start justify-start fill-white shadow txt-small">
+              <div class="flex align-start justify-space-between">
+                <strong class="popup__title">Tag this…</strong>
+                <kbd class="txt-xx-small hide-on-touch">t</kbd>
+              </div>
+              <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/taggings" id="card-tags-form" class="flex flex-column gap-half full-width margin-block-half">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input class="input txt-small full-width" name="tag_title" placeholder="{% if all_tags %}Add a new tag or filter…{% else %}Name this tag…{% endif %}" aria-label="Tag" autocomplete="off" data-hotkey-target="tag" data-popup-filter>
+              </form>
+              <ul class="popup__list">
+                {% for tag in all_tags %}
+                <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if tag.id in view.tags|map(attribute='id')|list else 'false' }}">
+                  <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/taggings" class="max-width flex-item-grow">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="tag_title" value="{{ tag.title }}">
+                    <button type="submit" class="popup__btn btn">
+                      <span class="overflow-ellipsis flex-item-grow">#{{ tag.title }}</span>
+                      <span class="icon icon--check checked flex-item-no-shrink flex-item-justify-end"></span>
+                    </button>
+                  </form>
+                </li>
+                {% endfor %}
+                <li class="popup__item" data-popup-keep>
+                  <button type="submit" form="card-tags-form" class="btn popup__btn">
+                    <span class="icon icon--add"></span>
+                    <span>Create tag</span>
+                  </button>
+                </li>
+              </ul>
+            </dialog>
+          </div>
+          {% endif %}
+          {% if view.tags %}
+          <div class="card__tags-list min-width">
+            {% for tag in view.tags %}
+            <a class="card__tag btn btn--plain min-width txt-uppercase fill-transparent" href="{{ slug }}/cards?board_ids[]={{ board.id }}&amp;tag_ids[]={{ tag.id }}">{{ tag.title }}</a>{% if not loop.last %},{% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
         </div>
       </header>
       <div class="card__body justify-space-between">
         <div class="card__content">
-          <form class="card__edit" method="post" action="{{ slug }}/cards/{{ view.card.number }}" enctype="multipart/form-data">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="_method" value="put">
-            <h1 class="card__title">
-              <label class="flex flex-column align-center">
-                <textarea class="card-field__title autoresize__textarea input input--textarea full-width borderless txt-align-start" name="card[title]" maxlength="255" rows="1" placeholder="Name it…" aria-label="Title" data-hotkey-target="edit">{{ view.card.title or '' }}</textarea>
-              </label>
+          <div data-card-display {% if view.card.status == "drafted" %}hidden{% endif %}>
+            <h1 class="card__title flex align-start gap-half">
+              <button type="button" class="card__title-link" data-card-edit>{{ view.card.title or "Untitled" }}</button>
             </h1>
-            <div class="card__description lexxy-content" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Description" data-plain="{{ view.description_text }}" data-placeholder="Add some notes, context, pictures, or video about this…">{{ view.description_html|safe }}</div>
-            <input type="hidden" name="card[description]" value="">
-            <button type="submit" class="for-screen-reader" data-hotkey="save">Save</button>
-            <label class="for-screen-reader">Image <input type="file" name="card[image]" accept="image/jpeg,image/png,image/gif,image/webp"></label>
-          </form>
-          <div class="steps">
+            {% if view.description_text %}
+            <div class="card__description lexxy-content">{{ view.description_html|safe }}</div>
+            {% endif %}
+          </div>
+          <div data-card-editor {% if view.card.status != "drafted" %}hidden{% endif %}>
+            <form class="card__edit" id="card-edit-form" method="post" action="{{ slug }}/cards/{{ view.card.number }}" enctype="multipart/form-data">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="_method" value="put">
+              <h1 class="card__title">
+                <label class="flex flex-column align-center">
+                  <textarea class="card-field__title autoresize__textarea input input--textarea full-width borderless txt-align-start hide-focus-ring hide-scrollbar" name="card[title]" maxlength="255" rows="1" placeholder="Name it…" aria-label="Title" data-hotkey-target="edit">{{ view.card.title or '' }}</textarea>
+                </label>
+              </h1>
+              <div class="card__description lexxy-content" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Description" data-plain="{{ view.description_text }}" data-placeholder="Add some notes, context, pictures, or video about this…">{{ view.description_html|safe }}</div>
+              <input type="hidden" name="card[description]" value="">
+              <button type="submit" class="for-screen-reader" data-hotkey="save">Save</button>
+              <label class="for-screen-reader">Image <input type="file" name="card[image]" accept="image/jpeg,image/png,image/gif,image/webp"></label>
+            </form>
+          </div>
+          {% if view.card.status == "published" %}
+          <ol class="steps txt-small margin-block-start-auto">
             {% for step in view.steps %}
-            <div class="steps__row flex align-center gap">
-              <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
+            <li class="step">
+              <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}" class="display-contents">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="_method" value="put">
                 <input type="hidden" name="step[completed]" value="{{ 'false' if step.completed else 'true' }}">
-                <button type="submit" class="btn btn--circle{% if step.completed %} is-on{% endif %}" aria-label="Toggle step">{% if step.completed %}<span class="icon icon--check"></span>{% endif %}</button>
+                <input type="checkbox" class="checkbox" {% if step.completed %}checked{% endif %} aria-label="{{ step.content }}">
               </form>
-              <input class="step__content input full-width{% if step.completed %} done{% endif %}" value="{{ step.content }}" aria-label="Step" data-url="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
-              <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="_method" value="delete">
-                <button class="btn btn--plain" type="submit">Remove</button>
-              </form>
-            </div>
+              <input class="input step__content hide-focus-ring" value="{{ step.content }}" aria-label="Step" data-url="{{ slug }}/cards/{{ view.card.number }}/steps/{{ step.id }}">
+            </li>
             {% endfor %}
-            <form class="flex gap" method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <input class="input full-width" name="step[content]" placeholder="Add a step" aria-label="New step">
-              <button class="btn" type="submit">Add</button>
-            </form>
-          </div>
+            {% if not view.closed %}
+            <li class="step">
+              <input type="checkbox" class="checkbox" disabled>
+              <form class="min-width" method="post" action="{{ slug }}/cards/{{ view.card.number }}/steps">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input class="input step__content hide-focus-ring" name="step[content]" placeholder="Add a step…" autocomplete="off" aria-label="Add a step">
+              </form>
+            </li>
+            {% endif %}
+          </ol>
+          {% endif %}
         </div>
-        {% if view.stages %}
-        <div class="card__stages">
-          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/triage">
+        {% if view.card.status == "published" %}
+        <div class="card__stages" role="radiogroup">
+          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/not_now" class="flex gap-half">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="card__column-name btn{% if view.postponed %} card__column-name--current{% endif %}" style="--column-color: var(--color-card-complete)" data-hotkey="postpone" {% if view.postponed %}disabled{% endif %}>Not now</button>
+          </form>
+          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/triage" class="flex gap-half">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="_method" value="delete">
-            <button type="submit" class="card__column-name btn{% if not view.column and not view.closed and not view.postponed %} card__column-name--current{% endif %}">Maybe?</button>
+            <button type="submit" class="card__column-name card__column-name--stream btn{% if not view.column and not view.closed and not view.postponed %} card__column-name--current{% endif %}" {% if not view.column and not view.closed and not view.postponed %}disabled{% endif %}>Maybe?</button>
           </form>
           {% for stage in view.stages %}
-          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/triage">
+          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/triage" class="flex gap-half">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="card__column-name btn{% if stage.current and not view.closed and not view.postponed %} card__column-name--current{% endif %}" name="column_id" value="{{ stage.id }}" type="submit" style="--column-color: {{ stage.color }}">{{ stage.name }}</button>
+            <button class="card__column-name btn{% if stage.current and not view.closed and not view.postponed %} card__column-name--current{% endif %}" name="column_id" value="{{ stage.id }}" type="submit" style="--column-color: {{ stage.color }}" {% if stage.current and not view.closed and not view.postponed %}disabled{% endif %}><span class="overflow-ellipsis">{{ stage.name }}</span></button>
           </form>
           {% endfor %}
+          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/closure" class="flex gap-half">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="card__column-name btn{% if view.closed %} card__column-name--current{% endif %}" style="--column-color: var(--color-card-complete)" data-hotkey="done" {% if view.closed %}disabled{% endif %}>
+              <span class="icon icon--check icon--mobile-only"></span>
+              Done
+            </button>
+          </form>
         </div>
         {% endif %}
         {% if view.stamp %}
@@ -96,34 +182,64 @@
       <footer class="card__footer">
         <div class="card__meta">
           <div class="card__meta-avatars card__meta-avatars--author">
-            {% if view.creator %}<span class="avatar txt-x-small">{{ view.creator.name[:1] }}</span>{% endif %}
+            {% if view.creator %}{% with person=view.creator, linked=true %}{% include "_avatar.html" %}{% endwith %}{% endif %}
           </div>
           <span class="card__meta-text card__meta-text--added">{% if view.card.status == "drafted" %}Drafted{% else %}Added{% endif %} {{ view.added_ago }}</span>
-          {% if view.creator %}<span class="card__meta-text card__meta-text--author">By <strong>{{ view.creator.name }}</strong></span>{% endif %}
-          <span class="card__meta-text card__meta-text--updated overflow-ellipsis">Updated {{ view.active_ago }}</span>
+          <span class="card__meta-text card__meta-text--author">{% if view.creator %}{{ view.creator.name }}{% endif %}</span>
+          <span class="card__meta-text card__meta-text--updated overflow-ellipsis"><span class="icon icon--refresh--meta" aria-label="Last updated"></span>{{ view.active_ago }}</span>
+          <span class="card__meta-text card__meta-text--assignees overflow-ellipsis">{% if view.assignees %}<span class="icon icon--arrow-right" aria-label="Assigned to"></span>{{ view.assignees|map(attribute='name')|join(' / ') }}{% endif %}</span>
+          <div class="card__meta-avatars card__meta-avatars--assignees">
+            <div class="position-relative" data-controller="dialog" {% if view.closed %}hidden{% endif %}>
+              <button type="button" class="card__assignees-trigger" data-dialog-open aria-label="Assign">
+                {% for person in view.assignees %}{% with linked=false %}{% include "_avatar.html" %}{% endwith %}{% endfor %}
+                <span class="btn card__hide-on-index" style="--btn-background: var(--card-bg-color);">
+                  <span class="icon icon--person-add"></span>
+                  <span class="for-screen-reader">Assign</span>
+                </span>
+              </button>
+              <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/self_assignment" hidden>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" data-hotkey="me">Assign to me</button>
+              </form>
+              <dialog class="popup panel flex-column align-start gap-half fill-white shadow">
+                <div class="flex align-start justify-space-between">
+                  <strong class="popup__title">Assign this to…</strong>
+                  <kbd class="txt-xx-small hide-on-touch">a</kbd>
+                </div>
+                <input type="search" class="input input--transparent txt-small margin-block-half" placeholder="Filter…" autocomplete="off" autocorrect="off" aria-label="Filter people" data-hotkey-target="assign" data-popup-filter>
+                <ul class="popup__list">
+                  {% if current_user %}
+                  <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if current_user.id in view.assignees|map(attribute='id')|list else 'false' }}">
+                    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/self_assignment" class="max-width flex-item-grow">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button type="submit" class="popup__btn btn">
+                        <span class="overflow-ellipsis flex-item-grow">Me</span>
+                        <kbd class="txt-xx-small hide-on-touch">m</kbd>
+                        <span class="icon icon--check checked flex-item-no-shrink flex-item-justify-end"></span>
+                      </button>
+                    </form>
+                  </li>
+                  {% endif %}
+                  {% for person in members if person.active and person.role != "system" and (not current_user or person.id != current_user.id) %}
+                  <li class="popup__item" role="checkbox" aria-checked="{{ 'true' if person.id in view.assignees|map(attribute='id')|list else 'false' }}">
+                    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/assignments" class="max-width flex-item-grow">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <input type="hidden" name="assignee_id" value="{{ person.id }}">
+                      <button type="submit" class="popup__btn btn">
+                        <span class="overflow-ellipsis flex-item-grow">{{ person.name }}</span>
+                        <span class="icon icon--check checked flex-item-no-shrink flex-item-justify-end"></span>
+                      </button>
+                    </form>
+                  </li>
+                  {% endfor %}
+                </ul>
+              </dialog>
+            </div>
+          </div>
         </div>
-        <div class="card__assign flex gap wrap">
-          {% for person in view.assignees %}
-          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/assignments">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="assignee_id" value="{{ person.id }}">
-            <button type="submit" class="btn">{{ person.name }} ×</button>
-          </form>
-          {% endfor %}
-          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/self_assignment">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="btn" data-hotkey="me">Assign to me <kbd>M</kbd></button>
-          </form>
-          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/assignments" class="flex gap">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <select class="input" name="assignee_id" aria-label="Assign" data-hotkey-target="assign">
-              {% for person in members if person.active %}
-              <option value="{{ person.id }}">{{ person.name }}</option>
-              {% endfor %}
-            </select>
-            <button type="submit" class="btn" data-hotkey="assign">Assign <kbd>A</kbd></button>
-          </form>
-        </div>
+        {% with reaction_items=reactions, reaction_url=slug ~ "/cards/" ~ view.card.number ~ "/reactions" %}
+          {% include "_reactions.html" %}
+        {% endwith %}
       </footer>
       {% if not view.closed and not view.postponed %}
       <div class="bubble" hidden data-closes-at="{{ view.closes_at }}" data-reminder-days="{{ view.reminder_days }}" data-stalled-at="{{ view.stalled_at }}">
@@ -167,7 +283,7 @@
   </div>
   {% elif view.closed %}
   <div class="card-perma__closure-message flex gap-half justify-center">
-    <span>Completed.</span>
+    <span>Completed{% if view.stamp and view.stamp.by %} by {{ view.stamp.by }}{% endif %}{% if view.stamp and view.stamp.date %} on {{ view.stamp.date }}{% endif %}.</span>
     <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/closure">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="_method" value="delete">
@@ -175,86 +291,105 @@
     </form>
   </div>
   {% else %}
-  <div class="card-perma__notch card-perma__notch--bottom">
+  <div class="card-perma__notch card-perma__notch--bottom" data-card-actions>
     <div class="flex gap-half">
+      <button type="button" class="btn btn--circle-mobile borderless" data-card-edit data-hotkey="edit">
+        <span class="icon icon--pencil icon--mobile-only"></span>
+        <span>Edit</span>
+        <kbd class="txt-x-small hide-on-touch">e</kbd>
+      </button>
       <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/closure">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" class="btn" data-hotkey="done">Mark as Done <kbd class="txt-x-small">D</kbd></button>
+        <button type="submit" class="btn btn--circle-mobile borderless" data-hotkey="done">
+          <span class="icon icon--check icon--mobile-only"></span>
+          <span class="overflow-ellipsis">Mark as Done</span>
+          <kbd class="txt-x-small hide-on-touch">d</kbd>
+        </button>
       </form>
-      {% if not view.postponed %}
-      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/not_now">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" class="btn btn--reversed" data-hotkey="postpone">Not Now <kbd class="txt-x-small">[</kbd></button>
-      </form>
-      {% endif %}
     </div>
+  </div>
+  <div class="card-perma__notch card-perma__notch--bottom flex-column" data-card-save hidden>
+    <button type="submit" form="card-edit-form" class="btn borderless">Save changes</button>
   </div>
   {% if not view.postponed %}
   <div class="card-perma__closure-message">
-    <p>Moves to Not Now after {{ days }} quiet days if there’s no activity.</p>
+    <p>Moves to “Not Now” after {{ days }} quiet days if there’s no activity.</p>
   </div>
   {% endif %}
   {% endif %}
 </section>
-<section class="comments panel panel--wide">
-  <h2>Comments</h2>
+<section class="comments gap center" style="--card-color: {{ view.color }}" role="group" aria-label="Messages">
   {% for item in comments %}
-  <article class="comment" id="comment-{{ item.comment.id }}">
-    <header><strong>{{ item.author.name if item.author else "Someone" }}</strong> <time>{{ item.comment.created_at }}</time></header>
-    <div class="prose">{{ item.html|safe }}</div>
-    <div class="reactions flex gap">
-      {% for reaction in item.reactions %}
-      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/comments/{{ item.comment.id }}/reactions/{{ reaction.id }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="_method" value="delete">
-        <button type="submit" class="btn">{{ reaction.content }}</button>
-      </form>
-      {% endfor %}
-      <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/comments/{{ item.comment.id }}/reactions" class="flex gap">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input class="input" name="reaction[content]" maxlength="16" placeholder="React" aria-label="Comment reaction">
-        <button type="submit" class="btn">Add</button>
-      </form>
+  {% if item.system %}<div class="comment-by-system">{% endif %}
+    <div class="comment align-start full-width" id="comment-{{ item.comment.id }}">
+      <figure class="comment__avatar flex-item-no-shrink" aria-hidden="true">
+        {% if item.author %}{% with person=item.author, linked=false %}{% include "_avatar.html" %}{% endwith %}{% else %}<span class="avatar">?</span>{% endif %}
+      </figure>
+      <div class="comment__content flex flex-column flex-item-grow full-width">
+        <div class="comment__author flex align-center gap-half">
+          <h3 class="font-weight-normal txt-normal flex-item-justify-start min-width overflow-ellipsis">
+            <strong>{% if item.author %}<a class="txt-ink btn btn--plain fill-transparent" href="{{ slug }}/users/{{ item.author.id }}">{{ item.author.name }}</a>{% else %}Someone{% endif %}</strong>
+            <span class="comment__permalink-title">{{ item.ago }}</span>
+          </h3>
+          {% if item.system %}
+          <button type="button" class="comment__history btn btn--circle-mobile borderless txt-x-small" data-history-toggle>
+            <span class="icon icon--history icon--mobile-only"></span>
+            <span>Full history</span>
+          </button>
+          {% endif %}
+        </div>
+        <div class="comment__body lexxy-content">{{ item.html|safe }}</div>
+        {% with reaction_items=item.reactions, reaction_url=slug ~ "/cards/" ~ view.card.number ~ "/comments/" ~ item.comment.id ~ "/reactions" %}
+          {% include "_reactions.html" %}
+        {% endwith %}
+      </div>
     </div>
-  </article>
-  {% else %}
-  <p>No comments yet.</p>
+  {% if item.system %}</div>{% endif %}
   {% endfor %}
-  <form class="flex flex-column gap" method="post" action="{{ slug }}/cards/{{ view.card.number }}/comments">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <textarea class="input" name="comment[body]" rows="3" required placeholder="Write a comment" aria-label="Comment"></textarea>
-    <button type="submit" class="btn btn--link">Comment</button>
-  </form>
-  <h2>Boosts</h2>
-  <div class="reactions flex gap">
-    {% for reaction in reactions %}
-    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/reactions/{{ reaction.id }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="_method" value="delete">
-      <button type="submit" class="btn">{{ reaction.content }}</button>
-    </form>
-    {% endfor %}
-    <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/reactions" class="flex gap">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input class="input" name="reaction[content]" maxlength="16" placeholder="Nice" aria-label="Boost">
-      <button type="submit" class="btn">Boost</button>
-    </form>
+  <div class="comment comment--new flex-inline align-start full-width">
+    <figure class="comment__avatar flex-item-no-shrink" aria-hidden="true">
+      {% if current_user %}{% with person=current_user, linked=false %}{% include "_avatar.html" %}{% endwith %}{% endif %}
+    </figure>
+    <div class="comment__content flex-inline flex-column full-width">
+      <div class="comment__body">
+        <form class="flex flex-column gap full-width" method="post" action="{{ slug }}/cards/{{ view.card.number }}/comments">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <textarea class="input" name="comment[body]" rows="3" required placeholder="Write a comment" aria-label="Comment"></textarea>
+          <span class="flex-inline align-center gap">
+            <button type="submit" class="comment__submit btn btn--reversed">Post</button>
+          </span>
+        </form>
+      </div>
+    </div>
   </div>
-  <form method="post" action="{{ slug }}/cards/{{ view.card.number }}/board" class="flex gap align-center">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="_method" value="put">
-    <label>Move to board
-      <select class="input" name="board_id">
-        {% for other in boards %}
-        <option value="{{ other.id }}" {% if other.id == board.id %}selected{% endif %}>{{ other.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button type="submit" class="btn">Move</button>
-  </form>
-  <form method="post" action="{{ slug }}/cards/{{ view.card.number }}" class="danger">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="_method" value="delete">
-    <button type="submit" class="btn">Delete card</button>
-  </form>
+  {% if watchers %}
+  <div class="comments__subscribers flex flex-column margin-block-start txt-align-start full-width">
+    <strong class="txt-uppercase">Subscribers</strong>
+    <p class="margin-none-block-start margin-block-end-half">{{ watchers|length }} {{ "person" if watchers|length == 1 else "people" }} will be notified when someone comments on this.</p>
+    <div class="flex align-center flex-wrap gap-half max-width txt-normal">
+      {% for person in watchers %}{% with linked=true %}{% include "_avatar.html" %}{% endwith %}{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  <footer class="delete-card txt-align-center full-width flex flex-column margin-block-start-double">
+    <hr class="separator--horizontal full-width margin-block" style="--border-color: var(--color-ink-lighter)">
+    <div data-dialog-modal>
+      <button type="button" class="btn txt-negative borderless txt-small" data-dialog-open>
+        <span class="icon icon--trash"></span>
+        <span>Delete this card</span>
+      </button>
+      <dialog class="dialog panel fill-white shadow gap flex-column" style="--panel-size: 40ch">
+        <h3 class="txt-large txt-bold">Delete this card?</h3>
+        <p class="txt-medium margin-block-half">Are you sure you want to permanently delete this card?</p>
+        <div class="flex gap-half justify-center margin-block-start">
+          <button type="button" class="btn" data-dialog-close>Cancel</button>
+          <form method="post" action="{{ slug }}/cards/{{ view.card.number }}" data-native-submit>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="_method" value="delete">
+            <button type="submit" class="btn txt-negative">Delete card</button>
+          </form>
+        </div>
+      </dialog>
+    </div>
+  </footer>
 </section>

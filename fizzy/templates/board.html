@@ -2,40 +2,16 @@
 {% block title %}{{ board.name }} · Fizzy{% endblock %}
 {% block header_title %}<span class="overflow-ellipsis">{{ board.name }}</span>{% endblock %}
 {% block header_end %}
-  <a class="btn btn--circle" href="{{ slug }}/boards/{{ board.id }}/edit" title="Board settings">
-    <span class="icon icon--gear"></span>
-    <span class="for-screen-reader">Settings</span>
+  <a class="btn btn--circle-mobile" href="{{ slug }}/boards/{{ board.id }}/edit" title="Board settings">
+    <span class="icon icon--settings"></span>
+    <span class="for-screen-reader">Settings for {{ board.name }}</span>
   </a>
 {% endblock %}
 {% block body_class %}contained-scrolling{% endblock %}
 {% block body %}
-<form class="filters board-filters" method="get" action="{{ slug }}/boards/{{ board.id }}">
-  <a class="btn" href="{{ slug }}/boards/{{ board.id }}" {% if not filtering %}aria-current="true"{% endif %}>Board</a>
-  <a class="btn" href="{{ slug }}/boards/{{ board.id }}?indexed_by=golden">Golden</a>
-  <a class="btn" href="{{ slug }}/boards/{{ board.id }}?indexed_by=stalled">Stalled</a>
-  <a class="btn" href="{{ slug }}/boards/{{ board.id }}?indexed_by=postponing_soon">Closing soon</a>
-  <a class="btn" href="{{ slug }}/boards/{{ board.id }}?indexed_by=closed">Done</a>
-  <a class="btn" href="{{ slug }}/boards/{{ board.id }}?indexed_by=not_now">Not Now</a>
-  <details class="filter">
-    <summary class="btn">People</summary>
-    <div class="popup panel">
-      {% for person in members if person.active and person.role != "system" %}
-      <label class="filter__label"><input type="checkbox" name="assignee_ids[]" value="{{ person.id }}" {% if person.id in filters.assignee_ids %}checked{% endif %}> {{ person.name }}</label>
-      {% endfor %}
-    </div>
-  </details>
-  <details class="filter">
-    <summary class="btn">Tags</summary>
-    <div class="popup panel">
-      {% for tag in tags %}
-      <label class="filter__label"><input type="checkbox" name="tag_ids[]" value="{{ tag.id }}" {% if tag.id in filters.tag_ids %}checked{% endif %}> #{{ tag.title }}</label>
-      {% else %}
-      <p>No tags yet.</p>
-      {% endfor %}
-    </div>
-  </details>
-  <input class="filter__terms input txt-x-small" name="q" value="{{ request.args.get('q', '') }}" placeholder="Filter these cards… [F]" data-hotkey-target="filter" aria-keyshortcuts="F" aria-label="Find">
-</form>
+{% with filter_url=slug ~ "/boards/" ~ board.id, clear_url=slug ~ "/boards/" ~ board.id, lock_board=true, filters_active=filtering %}
+  {% include "_filters.html" %}
+{% endwith %}
 <div id="cards_container">
   {% if current_user and not public_key and not filtering %}
     {% include "_add_card.html" %}

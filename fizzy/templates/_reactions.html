@@ -1,0 +1,55 @@
+{% set emojis = ["👏", "👍", "🙌", "💪", "🤘", "✊", "✨", "❤️", "💯", "🎉", "🤩", "🥳", "😊", "😀", "😂", "😅", "😎", "😉", "😜", "😬", "😮", "😳", "🤔", "😒", "😢", "😭", "😱", "👀", "🙏", "💩", "👎", "✌️", "👈", "👆", "✋", "👋", "☀️", "🌙", "💥", "🔥", "🎂", "🍴", "💰", "🥇", "🚨", "💡", "🛠", "📈", "✅", "📢"] %}
+<div class="reactions">
+  <div class="reactions__list">
+    {% for reaction in reaction_items %}
+    {% set person = members|selectattr("id", "equalto", reaction.reacter_id)|list|first %}
+    <div class="reaction">
+      <figure class="reaction__avatar margin-none flex-item-no-shrink">
+        {% if person %}{% with linked=false %}{% include "_avatar.html" %}{% endwith %}{% else %}<span class="avatar" aria-hidden="true">?</span>{% endif %}
+      </figure>
+      <span class="txt-small" role="button" tabindex="0" data-reaction-reveal>{{ reaction.content }}</span>
+      {% if current_user and reaction.reacter_id == current_user.id %}
+      <form method="post" action="{{ reaction_url }}/{{ reaction.id }}" class="display-contents">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="_method" value="delete">
+        <button type="submit" class="reaction__delete btn btn--negative flex-item-justify-end" aria-label="Delete this reaction">
+          <span class="icon icon--trash"></span>
+        </button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% if current_user %}
+  <button type="button" class="reactions__trigger btn btn--circle" data-reaction-open aria-label="Add your own reaction">
+    <img src="{{ url_for('static', filename='vendor/boost-color.svg') }}" alt="" aria-hidden="true">
+    <span class="for-screen-reader">Add your own reaction</span>
+  </button>
+  <form method="post" action="{{ reaction_url }}" class="reaction reaction__form" hidden data-reaction-form aria-label="New reaction">
+    <label class="reaction__form-label flex gap">
+      <figure class="reaction__avatar margin-none flex-item-no-shrink">
+        {% with person=current_user, linked=false %}{% include "_avatar.html" %}{% endwith %}
+      </figure>
+      <input class="input reaction__input txt-small" name="reaction[content]" maxlength="16" autocomplete="off" autocorrect="off" aria-label="Add a reaction">
+    </label>
+    <div class="reaction__menu">
+      <button class="reaction__menu-btn btn btn--circle borderless" type="button" data-dialog-open aria-label="Reaction emoji">
+        <span class="icon icon--reaction"></span>
+      </button>
+      <dialog class="reaction__popup popup panel fill-white shadow">
+        <div class="reaction__emoji-list">
+          {% for emoji in emojis %}
+          <button type="button" class="reaction__emoji-btn btn btn--circle borderless hide-focus-ring" data-emoji="{{ emoji }}" title="{{ emoji }}">{{ emoji }}</button>
+          {% endfor %}
+        </div>
+      </dialog>
+    </div>
+    <button class="reaction__submit-btn btn btn--circle borderless" type="submit" aria-label="Submit">
+      <span class="icon icon--check-circle"></span>
+    </button>
+    <button class="reaction__cancel-btn btn btn--circle borderless" type="button" data-reaction-cancel aria-label="Cancel">
+      <span class="icon icon--close-circle"></span>
+    </button>
+  </form>
+  {% endif %}
+</div>

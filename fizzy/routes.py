@@ -31,6 +31,7 @@ from .present import (
     account_json,
     board_json,
     card_json,
+    _ago,
     card_view,
     color_label,
     column_json,
@@ -939,14 +940,21 @@ def _board_stage_dict(board):
         })
     filters = _card_filters()
     filters["board_ids"] = [board["id"]]
+    indexed = request.args.get("indexed_by")
+    sorted_by = request.args.get("sorted_by")
     filtering = bool(
-        request.args.get("indexed_by")
+        (indexed and indexed != "all")
+        or (sorted_by and sorted_by != "latest")
         or request.args.get("q")
+        or multi("terms")
         or request.args.get("creation")
         or request.args.get("closure")
+        or request.args.get("assignment_status")
         or multi("assignee_ids")
         or multi("creator_ids")
+        or multi("closer_ids")
         or multi("tag_ids")
+        or multi("column_ids")
     )
     filtered = [card_view(conn(), card, g.user["id"]) for card in store.query_cards(conn(), g.user, filters, 60, 0)] if filtering else []
     return {
@@ -969,10 +977,13 @@ def _card_page_context(card, board):
     comments = []
     for comment in store.comments_of(conn(), card["id"]):
         body = store.rich_text(conn(), "Comment", comment["id"], "body")
+        author = store.user_by_id(conn(), comment["creator_id"])
         comments.append({
             "comment": comment,
             "html": (body["body"] if body else "") or "",
-            "author": store.user_by_id(conn(), comment["creator_id"]),
+            "author": author,
+            "ago": _ago(comment.get("created_at")),
+            "system": bool(author and author.get("role") == "system"),
             "reactions": store.reactions_of(conn(), "Comment", comment["id"]),
         })
     return {
@@ -984,6 +995,7 @@ def _card_page_context(card, board):
         "columns": store.columns_for(conn(), board["id"]),
         "all_tags": store.tags_in_account(conn(), g.account["id"]),
         "boards": store.boards_for(conn(), g.user),
+        "watchers": store.watchers(conn(), card["id"]),
         "days": store.postpone_days(conn(), g.account["id"], board["id"]),
     }
 

@@ -545,6 +545,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn("Maybe?", html)
         self.assertIn("Not Now", html)
         self.assertIn("Done", html)
+        self.assertIn("filter__terms", html)
+        self.assertIn("Filter these cards", html)
+        self.assertIn('id="maybe"', html)
         self.assertIn('data-hotkey="jump"', html)
         self.assertIn('data-hotkey="k"', html)
         self.assertIn('data-hotkey="p"', html)
@@ -552,6 +555,9 @@ class ApiTests(unittest.TestCase):
         token = re.search(r'name="csrf_token" value="([^"]+)"', html).group(1)
         action = re.search(r'action="([^"]+/columns)"', html).group(1)
         self.client.post(action, data={"csrf_token": token, "column[name]": "Doing", "column[color]": "var(--color-card-5)"})
+        with_column = self.client.get(made.location).get_data(as_text=True)
+        self.assertIn("Doing", with_column)
+        self.assertIn("Edit column", with_column)
         card_action = re.search(r'action="([^"]+/cards)"', html).group(1)
         token = re.search(r'name="csrf_token" value="([^"]+)"', self.client.get(made.location).get_data(as_text=True)).group(1)
         landed = self.client.post(
@@ -568,6 +574,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn('data-hotkey="gold"', card_html)
         self.assertIn('data-hotkey="postpone"', card_html)
         self.assertIn("after 30 quiet days", card_html)
+        self.assertIn("comment__body", card_html)
+        self.assertIn("header--card", card_html)
+        self.assertIn("card__meta-avatars--assignees", card_html)
         token = re.search(r'name="csrf_token" value="([^"]+)"', card_html).group(1)
         moved = self.client.post(
             card_href + "/closure",

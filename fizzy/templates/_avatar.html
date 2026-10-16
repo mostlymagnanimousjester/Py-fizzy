@@ -1,0 +1,7 @@
+{% if linked %}
+<a class="avatar" href="{{ slug }}/users/{{ person.id }}" aria-label="{{ person.name }}">
+{% else %}
+<span class="avatar" title="{{ person.name }}" tabindex="-1" aria-hidden="true">
+{% endif %}
+  <img src="{{ slug }}/users/{{ person.id }}/avatar" alt="" width="48" height="48">
+{% if linked %}</a>{% else %}</span>{% endif %}

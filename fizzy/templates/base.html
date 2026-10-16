@@ -12,7 +12,7 @@
 </head>
 <body class="{% if not current_user %}public{% endif %} {% block body_class %}{% endblock %}" data-slug="{{ slug }}" {% if current_user %}data-user-id="{{ current_user.id }}"{% endif %}>
   <div id="global-container">
-    <header class="header {% block header_class %}{% endblock %}" id="header">
+    <header class="header header--mobile-actions-stack {% block header_class %}{% endblock %}" id="header">
       <a href="#main" class="header__skip-navigation btn">Skip to main content</a>
       {% if current_user %}
       <nav class="nav">
