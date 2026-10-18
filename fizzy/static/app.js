@@ -1408,7 +1408,7 @@
 
   const KEYMAP = [
     ["h j k l", "Previous column, next card, previous card, next column. Arrows do the same."],
-    ["> <", "Move the selected card to the next or previous list. 3> jumps three lists."],
+    ["> <", "Move the selected card to the next or previous list. The next card in this list stays selected. 3> jumps three lists."],
     ["gg", "First card in this column."],
     ["G", "Last card. 3G is the third card."],
     ["Enter", "Open the selected card."],
@@ -1535,6 +1535,7 @@
     const take = Math.max(1, times || 1);
     const slice = cards.slice(index, index + take);
     const successor = cards[index + take] || cards[index - 1] || null;
+    const source = current.closest("section.cards");
     const jobs = [];
     slice.forEach(function (card) {
       const url = kind === "done" ? card.dataset.closureUrl : card.dataset.notNowUrl;
@@ -1543,26 +1544,14 @@
     if (!jobs.length) return;
     holdSelection = true;
     let chain = Promise.resolve();
-    let moved = null;
     jobs.forEach(function (url) {
       chain = chain.then(function () {
-        return post(url).then(function (payload) {
-          if (payload) moved = payload;
-        });
+        return post(url);
       });
     });
     chain.then(function () {
       holdSelection = false;
-      const column = successor && successor.closest("section.cards");
-      if (successor && successor.isConnected && (!column || !column.classList.contains("is-collapsed"))) {
-        selectCard(successor);
-        return;
-      }
-      const fresh = moved && document.querySelector('article.card[data-number="' + moved.number + '"]');
-      const dest = fresh && fresh.closest("section.cards");
-      if (dest && dest.classList.contains("is-collapsed")) showColumn(dest, { select: false });
-      if (fresh && fresh.isConnected) selectCard(fresh);
-      else chooseFallback();
+      selectAfterMove(source, successor);
     }, function () {
       holdSelection = false;
       chooseFallback();
@@ -1619,6 +1608,19 @@
     if (link) openSurface(link.href.split("#")[0] + "#edit");
   }
 
+  function selectAfterMove(source, successor) {
+    if (successor && successor.isConnected && source && source.contains(successor) && !source.classList.contains("is-collapsed")) {
+      selectCard(successor);
+      return;
+    }
+    if (source && source.isConnected) {
+      selectCard(null);
+      source.focus();
+      return;
+    }
+    chooseFallback();
+  }
+
   function moveLists() {
     return columns().filter(function (column) {
       return column.dataset.columnId || column.dataset.lane;
@@ -1653,15 +1655,14 @@
     if (destIndex === index) return;
     const move = columnMoveFields(list[destIndex], card.dataset.number);
     if (!move) return;
+    const cards = visibleCards(current);
+    const cardIndex = cards.indexOf(card);
+    const successor = cards[cardIndex + 1] || cards[cardIndex - 1] || null;
     movingCard = true;
     holdSelection = true;
-    post(move.url, move.fields).then(function (payload) {
+    post(move.url, move.fields).then(function () {
       holdSelection = false;
-      const fresh = payload && document.querySelector('article.card[data-number="' + payload.number + '"]');
-      const home = fresh && fresh.closest("section.cards");
-      if (home && home.classList.contains("is-collapsed")) showColumn(home, { select: false });
-      if (fresh && fresh.isConnected) selectCard(fresh);
-      else chooseFallback();
+      selectAfterMove(current, successor);
     }).catch(function () {
       holdSelection = false;
       chooseFallback();
