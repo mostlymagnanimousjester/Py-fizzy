@@ -12,7 +12,7 @@ python -m venv .venv
 .venv/bin/python -m fizzy
 ```
 
-Open http://127.0.0.1:47621 . The first visit can create an account in `instance/fizzy.sqlite3`. Sign-in codes are shown on the next page because nothing is emailed.
+Open http://127.0.0.1:47621 . The first visit signs in as `david@example.com`. If that identity is not already in `instance/fizzy.sqlite3`, the app creates it, with an account and an owner named David. There is no login code and no signup form.
 
 On a board, `C` adds a card, `J` opens the jump menu, `K` search, `P` pins, and `N` the inbox. Arrows move between columns and cards, Enter opens a card, `[` sends it to Not Now, `]` marks it Done, and `M` assigns it to you. On a card, `D` completes it, `E` edits the title, `T` tags, `A` assigns, Shift+`G` toggles gold, and Esc or Left goes back. Shortcuts stay quiet while you are typing.
 
@@ -34,7 +34,7 @@ FIZZY_STORAGE=/path/to/storage \
 python -m fizzy
 ```
 
-Opening the file runs the Fizzy app migrations through `20260828120000` and records them in `schema_migrations`. A database from an older Ruby release gains the current columns and tables in place, including polymorphic reactions, card numbers, and `identity_transfers`. A file this app already created is left intact and the historical versions are stamped. SaaS tables and the MySQL search shards are not created. Blob UUIDs, `0`/`1` booleans, and `YYYY-MM-DD HH:MM:SS.ffffff` timestamps stay as they are. Personal access tokens already in `identity_access_tokens` work as `Authorization: Bearer` values. The browser session cookie is this app's own session id, so log in again in the browser (the code appears on screen).
+Opening the file runs the Fizzy app migrations through `20260828120000` and records them in `schema_migrations`. A database from an older Ruby release gains the current columns and tables in place, including polymorphic reactions, card numbers, and `identity_transfers`. A file this app already created is left intact and the historical versions are stamped. SaaS tables and the MySQL search shards are not created. Blob UUIDs, `0`/`1` booleans, and `YYYY-MM-DD HH:MM:SS.ffffff` timestamps stay as they are. Personal access tokens already in `identity_access_tokens` work as `Authorization: Bearer` values. The browser does not read a Ruby session cookie. A page load with no david session signs in as `david@example.com` and reuses that identity's existing account when the file already has one.
 
 ## API
 

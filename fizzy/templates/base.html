@@ -80,11 +80,6 @@
             </nav>
             <p class="txt-x-small translucent">␣␣ jump · / search · hjkl move · &gt;&lt; lists · dd done · dn not now · ? keys</p>
           </div>
-          <form method="post" action="/logout">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="_method" value="delete">
-            <button type="submit" class="btn btn--plain"><span class="icon icon--logout"></span> Log out</button>
-          </form>
         </dialog>
       </nav>
       {% else %}

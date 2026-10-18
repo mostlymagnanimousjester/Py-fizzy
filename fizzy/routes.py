@@ -84,7 +84,7 @@ def check_csrf():
         return
     sent = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token")
     if not sent or sent != session.get("_csrf"):
-        # Issue a token first so a missing session doesn't loop forever on the login form.
+        # Issue a token first so a missing session doesn't loop forever on the form.
         if "_csrf" not in session:
             csrf_token()
             sent = request.form.get("csrf_token")
@@ -197,10 +197,14 @@ def verb() -> str:
 
 
 def load_identity():
+    if getattr(g, "_identity_loaded", False):
+        return
+    g._identity_loaded = True
     g.identity = None
     g.permission = "write"
     g.user = None
     g.account = None
+    g.dev_session_id = None
     header = request.headers.get("Authorization", "")
     if header.lower().startswith("bearer "):
         raw = header.split(" ", 1)[1].strip()
@@ -211,17 +215,27 @@ def load_identity():
         return
     session_id = request.cookies.get("session_token")
     if session_id:
-        g.identity = store.session_identity(conn(), session_id)
-        g.permission = "write"
+        identity = store.session_identity(conn(), session_id)
+        email = ((identity or {}).get("email_address") or "").strip().lower()
+        if identity and email == store.DEV_EMAIL:
+            g.identity = identity
+            g.permission = "write"
+            return
+    identity = store.ensure_dev_identity(conn())
+    g.identity = identity
+    g.permission = "write"
+    g.dev_session_id = store.create_session(
+        conn(),
+        identity["id"],
+        request.remote_addr,
+        request.user_agent.string,
+    )
 
 
 def require_identity():
     load_identity()
     if not g.identity:
-        if wants_json():
-            raise unauthorized()
-        session["next"] = request.url
-        return redirect(url_for("fizzy.login"))
+        raise unauthorized()
     return None
 
 
@@ -259,6 +273,14 @@ def require_card(number: int):
     if not board or not store.can_see_board(conn(), g.user, board):
         raise not_found("Card not found")
     return card, board
+
+
+@bp.after_request
+def remember_dev_session(response):
+    session_id = getattr(g, "dev_session_id", None)
+    if session_id:
+        response.set_cookie("session_token", session_id, httponly=True, samesite="Lax", path="/")
+    return response
 
 
 @bp.before_request
@@ -305,12 +327,16 @@ def _iso(value):
     return iso(value) or ""
 
 
-def _redirect_home():
-    accounts = [
+def _identity_accounts():
+    return [
         row
         for row in store.accounts_for_identity(conn(), g.identity["id"])
         if isinstance(row.get("external_account_id"), int)
     ]
+
+
+def _redirect_home():
+    accounts = _identity_accounts()
     nxt = session.pop("next", None)
     if nxt and nxt.startswith(request.host_url):
         return redirect(nxt)
@@ -319,116 +345,19 @@ def _redirect_home():
     return redirect(url_for("fizzy.accounts"))
 
 
-def _start_session(identity_id: str):
-    session_id = store.create_session(conn(), identity_id, request.remote_addr, request.user_agent.string)
-    response_target = _redirect_home()
-    # identity must be visible to _redirect_home
-    return session_id, response_target
-
-
-# --- signed-out -----------------------------------------------------------
-
 @bp.route("/")
 def root():
     load_identity()
-    if not g.identity:
-        return redirect(url_for("fizzy.login"))
+    if wants_json():
+        accounts = _identity_accounts()
+        payload = {
+            "email_address": g.identity["email_address"],
+            "accounts": [{"name": row["name"], "slug": f"/{row['external_account_id']}"} for row in accounts],
+        }
+        if len(accounts) == 1:
+            payload["slug"] = f"/{accounts[0]['external_account_id']}"
+        return json_body(payload)
     return _redirect_home()
-
-
-@bp.route("/signup", methods=["GET", "POST"])
-def signup():
-    load_identity()
-    if request.method == "GET":
-        return render_template("signup.html")
-    payload = form_body("signup")
-    identity, account, _user = store.signup(
-        conn(),
-        payload.get("email_address", ""),
-        payload.get("full_name", ""),
-        payload.get("account_name", ""),
-    )
-    session_id = store.create_session(conn(), identity["id"], request.remote_addr, request.user_agent.string)
-    g.identity = identity
-    if wants_json():
-        response = json_body(
-            {"id": identity["id"], "email_address": identity["email_address"], "slug": f"/{account['external_account_id']}"},
-            201,
-        )
-    else:
-        flash("Account created. This database now has a board waiting for work.")
-        response = redirect(f"/{account['external_account_id']}/boards/new")
-    response.set_cookie("session_token", session_id, httponly=True, samesite="Lax", path="/")
-    return response
-
-
-@bp.route("/login", methods=["GET", "POST"])
-def login():
-    load_identity()
-    if g.identity and request.method == "GET":
-        return _redirect_home()
-    if request.method == "GET":
-        return render_template("login.html")
-    payload = form_body("session") or form_body("login")
-    email = (payload.get("email_address") or request.form.get("email_address") or "").strip()
-    identity = store.identity_by_email(conn(), email) if email else None
-    if not identity:
-        raise invalid({"email_address": ["No identity uses that email. Create an account first."]})
-    link = store.create_magic_link(conn(), identity["id"], 0)
-    session["pending_link"] = link["id"]
-    if wants_json():
-        response = json_body(
-            {"pending_authentication_token": link["id"], "code": link["code"]},
-            201,
-        )
-        response.set_cookie("pending_authentication_token", link["id"], httponly=True, samesite="Lax", path="/")
-        return response
-    return render_template("login_code.html", code=link["code"], email=identity["email_address"])
-
-
-@bp.route("/session", methods=["POST", "DELETE"])
-def session_collection():
-    if verb() == "DELETE" or request.method == "DELETE":
-        load_identity()
-        session_id = request.cookies.get("session_token")
-        if session_id:
-            store.delete_session(conn(), session_id)
-        response = json_body({}, 204) if wants_json() else redirect(url_for("fizzy.login"))
-        response.delete_cookie("session_token", path="/")
-        return response
-    return login()
-
-
-@bp.route("/login/code", methods=["POST"])
-@bp.route("/session/magic_link", methods=["POST"])
-def magic_link():
-    payload = form_body("magic_link")
-    code = (payload.get("code") or request.form.get("code") or "").strip()
-    link_id = (
-        request.cookies.get("pending_authentication_token")
-        or session.get("pending_link")
-        or payload.get("pending_authentication_token")
-    )
-    if not link_id or not code:
-        raise unauthorized("The code doesn't match")
-    identity = store.consume_magic_link(conn(), link_id, code)
-    if not identity:
-        raise unauthorized("The code doesn't match")
-    session.pop("pending_link", None)
-    session_id = store.create_session(conn(), identity["id"], request.remote_addr, request.user_agent.string)
-    g.identity = identity
-    if wants_json():
-        response = json_body({"session_token": session_id})
-    else:
-        response = _redirect_home()
-    response.set_cookie("session_token", session_id, httponly=True, samesite="Lax", path="/")
-    response.delete_cookie("pending_authentication_token", path="/")
-    return response
-
-
-@bp.route("/logout", methods=["POST"])
-def logout():
-    return session_collection()
 
 
 @bp.route("/accounts")
@@ -1513,8 +1442,8 @@ def email_confirm(slug, user_id, token):
     store.apply_email_change(conn(), user_id, data["email"])
     if wants_json():
         return json_body({}, 204)
-    flash("Email address updated. Log in with the new address next time.")
-    return redirect(url_for("fizzy.login"))
+    flash("Email address updated.")
+    return redirect(f"/{slug}/")
 
 
 @bp.route("/<int:slug>/notifications")

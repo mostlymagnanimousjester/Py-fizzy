@@ -86,7 +86,7 @@ def enc(conn: sqlite3.Connection, table: str, column: str, value):
     # Integer keys such as external_account_id stay numbers. Every other id is
     # a UUID, including columns declared uuid, binary, varchar, or blob(16).
     # Writing a base36 string into a blob column makes the next session join
-    # miss, and the login cookie is thrown away.
+    # miss, and the session cookie is thrown away.
     uuid_column = id_like and "int" not in declared and (
         "blob" in declared
         or "binary" in declared

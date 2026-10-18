@@ -9,7 +9,7 @@ import sqlite3
 from datetime import timedelta
 from pathlib import Path
 
-from .codec import dump_dt, iso, magic_code, new_id, parse_dt, token, utcnow
+from .codec import dump_dt, iso, new_id, parse_dt, token, utcnow
 from .constants import (
     BUNDLE_FREQUENCIES,
     COLOR_NAMES,
@@ -24,13 +24,15 @@ from .errors import FizzyError, forbidden, invalid, not_found
 from .text import mention_ids_from_html, plain_text, to_html
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+DEV_EMAIL = "david@example.com"
+DEV_NAME = "David"
 
 
 def _active_sql(alias: str = "users") -> str:
     """True for 1, NULL, and the 't'/'true' strings SQLite still stores.
 
     ``users.active = 1`` is false for those strings, so a person who could
-    open the account in Ruby was left with no account after the magic link.
+    open the account in Ruby was left with no account.
     """
     column = f"{alias}.active" if alias else "active"
     return (
@@ -85,34 +87,6 @@ def identity_by_email(conn, email: str):
 
 def identity_by_id(conn, identity_id: str):
     return q1(conn, "SELECT * FROM identities WHERE id = ?", (_id(conn, "identities", "id", identity_id),))
-
-
-def create_magic_link(conn, identity_id: str, purpose: int = 0):
-    code = magic_code()
-    while q1(conn, "SELECT id FROM magic_links WHERE code = ?", (code,)):
-        code = magic_code()
-    link_id = insert(
-        conn,
-        "magic_links",
-        code=code,
-        expires_at=utcnow() + timedelta(minutes=15),
-        identity_id=identity_id,
-        purpose=purpose,
-    )
-    return q1(conn, "SELECT * FROM magic_links WHERE id = ?", (_id(conn, "magic_links", "id", link_id),))
-
-
-def consume_magic_link(conn, link_id: str, code: str):
-    link = q1(conn, "SELECT * FROM magic_links WHERE id = ?", (_id(conn, "magic_links", "id", link_id),))
-    if not link:
-        return None
-    expires = parse_dt(link["expires_at"])
-    if expires is None or expires < utcnow():
-        return None
-    if link["code"].upper() != code.strip().upper():
-        return None
-    delete_where(conn, "magic_links", id=link["id"])
-    return identity_by_id(conn, link["identity_id"])
 
 
 def create_session(conn, identity_id: str, ip: str | None, user_agent: str | None):
@@ -267,10 +241,40 @@ def signup(conn, email: str, full_name: str, account_name: str):
     if not EMAIL_RE.match(email):
         raise invalid({"email_address": ["is not a valid email"]})
     if identity_by_email(conn, email):
-        raise invalid({"email_address": ["already has an account — log in instead"]})
+        raise invalid({"email_address": ["already has an account"]})
     identity_id = insert(conn, "identities", email_address=email, staff=False)
     account, user = create_account(conn, name=account_name or f"{full_name}'s Fizzy", owner_name=full_name, identity_id=identity_id)
     return identity_by_id(conn, identity_id), account, user
+
+
+def ensure_dev_identity(conn):
+    """Return david@example.com, creating that identity and account only when missing.
+
+    Other identities in a swapped file are not linked or removed. An identity
+    that already has a membership is reused, including when that membership is
+    the only account in the file.
+    """
+    identity = identity_by_email(conn, DEV_EMAIL)
+    if identity is None:
+        identity, _account, _user = signup(conn, DEV_EMAIL, DEV_NAME, DEV_NAME)
+        return identity
+    if _identity_has_membership(conn, identity["id"]):
+        return identity
+    create_account(conn, name=DEV_NAME, owner_name=DEV_NAME, identity_id=identity["id"])
+    return identity_by_id(conn, identity["id"])
+
+
+def _identity_has_membership(conn, identity_id: str) -> bool:
+    row = q1(
+        conn,
+        """
+        SELECT id FROM users
+        WHERE identity_id = ?
+          AND (role IS NULL OR lower(CAST(role AS TEXT)) != 'system')
+        """,
+        (_id(conn, "users", "identity_id", identity_id),),
+    )
+    return row is not None
 
 
 def accounts_for_identity(conn, identity_id: str):

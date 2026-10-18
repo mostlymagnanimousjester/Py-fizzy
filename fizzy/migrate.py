@@ -226,7 +226,7 @@ def _normalize_stored_ids(conn) -> None:
 
     Session lookup joins ``identities.id = sessions.identity_id``. A new
     session stored as a blob cannot see an identity still stored as text, so
-    the code is accepted and the next request is sent back to login.
+    the next request would not find that session.
     """
     tables = conn.execute(
         "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
@@ -768,9 +768,8 @@ def _copy_record_account(conn, table: str, type_column: str, id_column: str) -> 
 def _backfill_external_account_ids(conn) -> None:
     """Give every account an integer slug.
 
-    A file from before external ids existed redirects to ``/None/`` after a
-    successful magic link, and that path is not an account. Numbers already
-    present stay where they are.
+    A file from before external ids existed has no integer slug, so ``/None/``
+    is not an account. Numbers already present stay where they are.
     """
     if not _has_table(conn, "accounts") or "external_account_id" not in _column_names(conn, "accounts"):
         return

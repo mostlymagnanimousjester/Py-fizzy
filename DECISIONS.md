@@ -7,8 +7,8 @@ This is a personal localhost tool. The bar for each feature was: does a Fizzy SQ
 - **SQLite only.** `FIZZY_DATABASE` is one file. MySQL and the 16 `search_records_*` shards are not opened. New files get the tables from `db/schema_sqlite.rb` (version `20260828120000`), including `search_records` with an integer primary key and an FTS5 table so the file shape is familiar. Opening any file runs those app migrations in place and stamps every version. SaaS migrations are not applied.
 - **Rails values.** Ids are 16-byte blobs in the file and 25-character base36 strings in JSON and URLs. Booleans are `0`/`1`. Timestamps are UTC `YYYY-MM-DD HH:MM:SS.ffffff`. JSON columns stay text. Foreign keys stay off.
 - **Account slug.** `/{external_account_id}/...` matches Fizzy. Card URLs use the card number.
-- **Magic-link login, without mail.** The 6-character code is returned in the HTML page and in the JSON body. Signup creates the identity, account, owner, and system user, then logs in. There is no password and no passkey table usage.
-- **Bearer tokens.** `identity_access_tokens.token` is the plaintext Fizzy already stores. `read` tokens cannot write. Cookie sessions are a raw session-row id, not a Rails signed id. A browser logged into Ruby will not be logged in here.
+- **One local user.** The browser always signs in as `david@example.com`. A request with no session for that identity creates the session during the same request and sets the cookie. If the identity is missing, the app creates it with an account and an owner named David. An existing david account is reused. Other identities in a swapped file are left alone. There is no password.
+- **Bearer tokens.** `identity_access_tokens.token` is the plaintext Fizzy already stores. `read` tokens cannot write. Cookie sessions are a raw session-row id for david, not a Rails signed id. A Ruby session cookie is not read.
 - **Boards, columns, cards.** Maybe (published, open, not postponed, no column), workflow columns, Not now (`card_not_nows`, column cleared), Done (`closures`, column kept). Golden cards sort first. Triage resumes a card, then sets the column. Allowed postpone periods are 3, 7, 11, 30, 90, and 365 days. Auto-postpone runs when the HTML board is opened, as the system user, and does not refresh `last_active_at`.
 - **Steps, comments, reactions, tags, assignments, watches, pins.** Comments and descriptions are Action Text rows (`div.action-text-content`). HTML is sanitized. `@Name` mentions and `data-user-id` mentions notify and watch.
 - **In-app notifications.** One row per user and card; a new event clears `read_at` and bumps `unread_count`. Push tables exist for a swapped file and are never written.
@@ -23,6 +23,7 @@ This is a personal localhost tool. The bar for each feature was: does a Fizzy SQ
 
 - **Push notifications.** `push_subscriptions` is unused. No web-push, VAPID, or service worker.
 - **Email delivery and digests.** `bundle_email_frequency` is stored so a Ruby file keeps its setting. Nothing is sent. `notification_bundles` are not built.
+- **Magic-link login, signup, and logout.** Ruby emails a code and can create more identities. This localhost app does not. The `magic_links` table stays so a swapped file keeps its shape.
 - **Passkeys, identity transfer, QR login, PWA, native shell.**
 - **SaaS, billing, account cancellation jobs, imports from other products.**
 - **Background jobs.** Auto-postpone, webhook delivery, and exports run in the request that needs them.

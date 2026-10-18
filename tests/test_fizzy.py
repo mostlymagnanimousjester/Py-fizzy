@@ -40,26 +40,9 @@ def _csrf(html: str) -> str:
     return match.group(1)
 
 
-def _login(client, email, user_agent=None):
+def _open_as_david(client, user_agent=None):
     headers = {"User-Agent": user_agent} if user_agent else {}
-    page = client.get("/login", headers=headers)
-    token = _csrf(page.get_data(as_text=True))
-    code_page = client.post(
-        "/login",
-        data={"csrf_token": token, "email_address": email},
-        headers=headers,
-    )
-    code_html = code_page.get_data(as_text=True)
-    match = re.search(r"Your code is ([0-9A-Z]+)", code_html)
-    if match is None:
-        raise AssertionError(code_html[:800])
-    token = _csrf(code_html)
-    return client.post(
-        "/login/code",
-        data={"csrf_token": token, "code": match.group(1)},
-        headers=headers,
-        follow_redirects=False,
-    )
+    return client.get("/", headers=headers, follow_redirects=False)
 
 
 def _open_client(path: Path):
@@ -577,13 +560,10 @@ class ApiTests(unittest.TestCase):
         return getattr(self.client, method)(path, headers=headers, **kwargs)
 
     def test_board_flow_and_swap_shape(self):
-        created = self.request(
-            "post",
-            "/signup",
-            json={"signup": {"email_address": "ada@example.com", "full_name": "Ada Lovelace", "account_name": "Home"}},
-        )
-        self.assertEqual(created.status_code, 201, created.get_data(as_text=True))
+        created = self.request("get", "/")
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
         body = created.get_json()
+        self.assertEqual(body["email_address"], "david@example.com")
         slug = body["slug"]
         token_response = self.request(
             "post",
@@ -757,23 +737,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(download.status_code, 200)
         self.assertIn(b"manifest.json", download.data)
 
-    def test_html_board_and_magic_link(self):
-        page = self.client.get("/signup")
-        token = re.search(r'name="csrf_token" value="([^"]+)"', page.get_data(as_text=True)).group(1)
-        signed = self.client.post(
-            "/signup",
-            data={
-                "csrf_token": token,
-                "signup[full_name]": "Grace Hopper",
-                "signup[email_address]": "grace@example.com",
-                "signup[account_name]": "Navy",
-            },
-            follow_redirects=True,
-        )
-        self.assertIn("Name the work", signed.get_data(as_text=True))
-        token = re.search(r'name="csrf_token" value="([^"]+)"', signed.get_data(as_text=True)).group(1)
+    def test_html_board_opens_as_david(self):
+        self.assertEqual(self.client.get("/login").status_code, 404)
+        self.assertEqual(self.client.get("/signup").status_code, 404)
+        signed = self.client.get("/", follow_redirects=True)
+        signed_html = signed.get_data(as_text=True)
+        self.assertEqual(signed.status_code, 200, signed_html)
+        self.assertIn("Latest Activity", signed_html)
+        self.assertNotIn("Your code is", signed_html)
+        self.assertNotIn("Log out", signed_html)
+        new_board = re.search(r'href="([^"]+/boards/new)"', signed_html).group(1)
+        form = self.client.get(new_board)
+        self.assertIn("Name the work", form.get_data(as_text=True))
+        token = _csrf(form.get_data(as_text=True))
         made = self.client.post(
-            signed.request.path.replace("/boards/new", "/boards"),
+            new_board.replace("/boards/new", "/boards"),
             data={"csrf_token": token, "board[name]": "Compiler"},
             follow_redirects=False,
         )
@@ -836,16 +814,13 @@ class ApiTests(unittest.TestCase):
         self.assertIn("Undo", sheet["html"])
         self.assertEqual(sheet["boardName"], "Compiler")
 
-        self.client.post("/logout", data={"csrf_token": token, "_method": "delete"})
-        login = self.client.get("/login")
-        token = re.search(r'name="csrf_token" value="([^"]+)"', login.get_data(as_text=True)).group(1)
-        code_page = self.client.post("/login", data={"csrf_token": token, "email_address": "grace@example.com"})
-        code_html = code_page.get_data(as_text=True)
-        code = re.search(r"Your code is ([0-9A-Z]+)", code_html).group(1)
-        token = re.search(r'name="csrf_token" value="([^"]+)"', code_html).group(1)
-        home = self.client.post("/login/code", data={"csrf_token": token, "code": code}, follow_redirects=True)
-        self.assertIn("Latest Activity", home.get_data(as_text=True))
-        self.assertIn("Added", home.get_data(as_text=True))
+        fresh = self.app.test_client()
+        home = fresh.get("/", follow_redirects=True)
+        home_html = home.get_data(as_text=True)
+        self.assertEqual(home.status_code, 200, home_html)
+        self.assertIn("Latest Activity", home_html)
+        self.assertIn("Added", home_html)
+        self.assertNotIn("Your code is", home_html)
 
 
 class SwapTests(unittest.TestCase):
@@ -934,12 +909,9 @@ class SwapTests(unittest.TestCase):
             root = Path(tmp)
             application = app_in(root)
             client = application.test_client()
-            signed = client.post(
-                "/signup",
-                json={"signup": {"email_address": "ada@example.com", "full_name": "Ada Lovelace", "account_name": "Home"}},
-                headers={"Accept": "application/json"},
-            )
-            self.assertEqual(signed.status_code, 201, signed.get_data(as_text=True))
+            signed = client.get("/", headers={"Accept": "application/json"})
+            self.assertEqual(signed.status_code, 200, signed.get_data(as_text=True))
+            self.assertEqual(signed.get_json()["email_address"], "david@example.com")
             slug = signed.get_json()["slug"]
             token = client.post(
                 "/my/access_tokens",
@@ -1109,9 +1081,10 @@ class ExistingAccountLoginTests(unittest.TestCase):
             raw.close()
 
             client = _open_client(path)
-            landed = _login(client, "ada@example.com", user_agent="Browser" * 80)
+            landed = _open_as_david(client, user_agent="Browser" * 80)
             self.assertEqual(landed.status_code, 302, landed.get_data(as_text=True))
-            self.assertIn("/1/", landed.location)
+            self.assertRegex(landed.location or "", r"/\d+/?$")
+            self.assertNotIn("/1/", landed.location)
             home = client.get(landed.location)
             self.assertEqual(home.status_code, 200, home.get_data(as_text=True))
             self.assertIn("Latest Activity", home.get_data(as_text=True))
@@ -1132,12 +1105,20 @@ class ExistingAccountLoginTests(unittest.TestCase):
                 "grace@example.com",
             )
             self.assertIsNone(check.execute("SELECT identity_id FROM users WHERE name = 'Orphan'").fetchone()["identity_id"])
-            self.assertIsNone(check.execute("SELECT identity_id FROM users WHERE name = 'System'").fetchone()["identity_id"])
+            systems = check.execute("SELECT identity_id FROM users WHERE name = 'System'").fetchall()
+            self.assertTrue(systems)
+            self.assertTrue(all(row["identity_id"] is None for row in systems))
             self.assertIsNotNone(
                 check.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memberships'").fetchone()
             )
-            stored_agent = check.execute("SELECT user_agent FROM sessions").fetchone()["user_agent"]
-            self.assertLessEqual(len(stored_agent), 255)
+            agents = [row["user_agent"] for row in check.execute("SELECT user_agent FROM sessions")]
+            self.assertTrue(agents)
+            self.assertTrue(all(agent and len(agent) <= 255 and agent.startswith("Browser") for agent in agents))
+            self.assertIsNotNone(
+                check.execute(
+                    "SELECT id FROM identities WHERE lower(trim(email_address)) = 'david@example.com'"
+                ).fetchone()
+            )
             check.close()
 
             again = connect(path)
@@ -1196,12 +1177,14 @@ class ExistingAccountLoginTests(unittest.TestCase):
             raw.close()
 
             client = _open_client(path)
-            landed = _login(client, "ada@example.com")
+            landed = _open_as_david(client)
             self.assertEqual(landed.status_code, 302, landed.get_data(as_text=True))
-            self.assertIn("/1/", landed.location)
-            home = client.get("/1/")
+            self.assertNotIn("/1/", landed.location)
+            home = client.get(landed.location)
             self.assertEqual(home.status_code, 200, home.get_data(as_text=True))
             self.assertIn("Latest Activity", home.get_data(as_text=True))
+            denied = client.get("/1/")
+            self.assertEqual(denied.status_code, 403)
 
             check = sqlite3.connect(path)
             check.row_factory = sqlite3.Row
@@ -1226,15 +1209,19 @@ class ExistingAccountLoginTests(unittest.TestCase):
             again = check.execute(
                 "SELECT identity_id, active FROM users WHERE name = 'Ada'"
             ).fetchone()
-            slug = check.execute("SELECT external_account_id FROM accounts").fetchone()["external_account_id"]
-            email = check.execute("SELECT email_address FROM identities").fetchone()["email_address"]
+            slug = check.execute(
+                "SELECT external_account_id FROM accounts WHERE name = 'Desk'"
+            ).fetchone()["external_account_id"]
+            email = check.execute(
+                "SELECT email_address FROM identities WHERE lower(trim(email_address)) = 'ada@example.com'"
+            ).fetchone()["email_address"]
             self.assertEqual(bytes(again["identity_id"]), identity)
             self.assertEqual(again["active"], 1)
             self.assertEqual(slug, 1)
             self.assertEqual(email, "ada@example.com")
             check.close()
 
-    def test_one_unlinked_person_logs_into_the_only_identity(self):
+    def test_one_unlinked_person_stays_linked_beside_david(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "fizzy.sqlite3"
             account = b"\x51" * 16
@@ -1287,14 +1274,23 @@ class ExistingAccountLoginTests(unittest.TestCase):
             raw.close()
 
             client = _open_client(path)
-            landed = _login(client, "ada@example.com")
+            landed = _open_as_david(client)
             self.assertEqual(landed.status_code, 302, landed.get_data(as_text=True))
-            self.assertIn("/4/", landed.location)
-            home = client.get("/4/")
+            self.assertNotIn("/4/", landed.location)
+            home = client.get(landed.location)
             self.assertEqual(home.status_code, 200, home.get_data(as_text=True))
             check = sqlite3.connect(path)
-            self.assertEqual(check.execute("SELECT identity_id FROM users").fetchone()[0], identity)
-            self.assertEqual(check.execute("SELECT active FROM users").fetchone()[0], 1)
+            self.assertEqual(check.execute("SELECT identity_id FROM users WHERE name = 'Ada'").fetchone()[0], identity)
+            self.assertEqual(check.execute("SELECT active FROM users WHERE name = 'Ada'").fetchone()[0], 1)
+            self.assertEqual(
+                check.execute("SELECT external_account_id FROM accounts WHERE name = 'Home'").fetchone()[0],
+                4,
+            )
+            david = check.execute(
+                "SELECT identity_id FROM users WHERE name = 'David'"
+            ).fetchone()[0]
+            self.assertIsNotNone(david)
+            self.assertNotEqual(david, identity)
             check.close()
 
     def test_several_unlinked_accounts_are_not_guessed(self):
@@ -1356,16 +1352,34 @@ class ExistingAccountLoginTests(unittest.TestCase):
             )
             conn.close()
 
+            client = _open_client(path)
+            landed = client.get("/")
+            self.assertEqual(landed.status_code, 302, landed.get_data(as_text=True))
+            check = sqlite3.connect(path)
+            for name in ("Person 0", "Person 1"):
+                self.assertIsNone(
+                    check.execute("SELECT identity_id FROM users WHERE name = ?", (name,)).fetchone()[0]
+                )
+            self.assertIsNotNone(
+                check.execute(
+                    "SELECT id FROM identities WHERE email_address = 'david@example.com'"
+                ).fetchone()
+            )
+            self.assertEqual(
+                {row[0] for row in check.execute(
+                    "SELECT external_account_id FROM accounts WHERE name LIKE 'Account %'"
+                )},
+                {1, 2},
+            )
+            check.close()
+
     def test_current_account_stays_linked_across_opens(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             client = app_in(root).test_client()
-            signed = client.post(
-                "/signup",
-                json={"signup": {"email_address": "ada@example.com", "full_name": "Ada Lovelace", "account_name": "Home"}},
-                headers={"Accept": "application/json"},
-            )
-            self.assertEqual(signed.status_code, 201, signed.get_data(as_text=True))
+            signed = client.get("/", headers={"Accept": "application/json"})
+            self.assertEqual(signed.status_code, 200, signed.get_data(as_text=True))
+            self.assertEqual(signed.get_json()["email_address"], "david@example.com")
             slug = signed.get_json()["slug"]
             path = root / "fizzy.sqlite3"
 
@@ -1391,18 +1405,27 @@ class ExistingAccountLoginTests(unittest.TestCase):
                 return values
 
             before = snapshot()
+            self.assertEqual(before[2], "david@example.com")
             connect(path).close()
             self.assertEqual(snapshot(), before)
             page = client.get(f"{slug}/")
-            token = _csrf(page.get_data(as_text=True))
-            client.post("/logout", data={"csrf_token": token, "_method": "delete"})
-            landed = _login(client, "ada@example.com")
+            self.assertEqual(page.status_code, 200, page.get_data(as_text=True))
+            client.delete_cookie("session_token")
+            landed = client.get("/")
             self.assertEqual(landed.status_code, 302, landed.get_data(as_text=True))
             self.assertIn(f"{slug}/", landed.location)
             home = client.get(landed.location)
             self.assertEqual(home.status_code, 200, home.get_data(as_text=True))
             self.assertIn("Latest Activity", home.get_data(as_text=True))
             self.assertEqual(snapshot(), before)
+            check = sqlite3.connect(path)
+            self.assertEqual(
+                check.execute(
+                    "SELECT COUNT(*) FROM identities WHERE email_address = 'david@example.com'"
+                ).fetchone()[0],
+                1,
+            )
+            check.close()
 
 
 if __name__ == "__main__":
