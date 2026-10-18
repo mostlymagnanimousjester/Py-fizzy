@@ -122,3 +122,15 @@ button.card__title-link {
 .cards__new-column dialog[open] {
   display: flex;
 }
+
+/* Off-screen cards skip layout and paint. A visible bubble overflows the
+   card, so those stay painted. The selected card and the drag image stay
+   fully rendered. */
+.cards__list > article.card {
+  contain: layout style;
+}
+
+.cards__list > article.card:not(:has(.bubble:not([hidden]))):not([aria-selected]):not(.drag-and-drop__dragged-item) {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 10rem;
+}

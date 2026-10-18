@@ -12,16 +12,51 @@
 
   let boardNode = null;
   let boardFresh = false;
+  let gridNode = null;
+  let gridFresh = false;
   let columnList = null;
   let columnRoot = null;
   let listGeneration = 0;
   const cardCache = new WeakMap();
+  const watchedLists = new WeakSet();
+  const watchedFilters = new WeakSet();
+  const parked = new WeakMap();
+  let geomStamp = 0;
+  const geomCache = new WeakMap();
+  let interactionStamp = 0;
+
+  document.addEventListener("keydown", function () {
+    interactionStamp += 1;
+  }, true);
+  document.addEventListener("pointerdown", function () {
+    interactionStamp += 1;
+  }, { capture: true, passive: true });
+  document.addEventListener("scroll", function () {
+    bumpGeom();
+  }, { capture: true, passive: true });
+  document.addEventListener("touchmove", function () {
+    bumpGeom();
+  }, { capture: true, passive: true });
+
+  function bumpGeom() {
+    geomStamp += 1;
+  }
+
+  function boxOf(node) {
+    const hit = geomCache.get(node);
+    if (hit && hit.stamp === geomStamp) return hit.box;
+    const box = node.getBoundingClientRect();
+    geomCache.set(node, { stamp: geomStamp, box: box });
+    return box;
+  }
 
   function invalidateLists() {
     listGeneration += 1;
     boardFresh = false;
+    gridFresh = false;
     columnList = null;
     columnRoot = null;
+    bumpGeom();
   }
 
   function boardRoot() {
@@ -97,6 +132,7 @@
   let cardIndexMemory = 0;
   let selectedNode = null;
   let selectedColumn = null;
+  let selectionEpoch = 0;
   let revealFrame = 0;
   let revealTarget = null;
 
@@ -112,12 +148,12 @@
   }
 
   function cardInView(card) {
-    const box = card.getBoundingClientRect();
+    const box = boxOf(card);
     if (box.width === 0 || box.height === 0) return false;
     const list = card.closest(".cards__list, .card-grid");
-    if (list && !inside(box, list.getBoundingClientRect())) return false;
+    if (list && !inside(box, boxOf(list))) return false;
     const band = card.closest(".card-columns");
-    if (band && !inside(box, band.getBoundingClientRect())) return false;
+    if (band && !inside(box, boxOf(band))) return false;
     return box.top >= 0 && box.left >= 0 && box.bottom <= window.innerHeight && box.right <= window.innerWidth;
   }
 
@@ -126,6 +162,7 @@
     const active = document.activeElement;
     const field = active && active.closest && active.closest("input, textarea, select, [contenteditable]");
     if (!field && active !== card) card.focus({ preventScroll: true });
+    bumpGeom();
     if (!cardInView(card)) card.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
@@ -141,6 +178,7 @@
   }
 
   function selectCard(card, index, coarse) {
+    selectionEpoch += 1;
     if (selectedNode && selectedNode !== card) {
       if (selectedNode.isConnected) selectedNode.removeAttribute("aria-selected");
       else {
@@ -179,6 +217,8 @@
     }
     card.setAttribute("aria-selected", "true");
     selectedNode = card;
+    const link = card.querySelector(".card__link");
+    if (link) schedulePrefetch(link.getAttribute("href"));
     if (coarse) scheduleReveal(card);
     else {
       cancelReveal();
@@ -279,8 +319,16 @@
   }
 
   function gridElement() {
-    if (boardRoot()) return null;
-    return document.querySelector(".cards-grid, .card-grid, .cards--grid");
+    if (boardRoot()) {
+      gridNode = null;
+      gridFresh = true;
+      return null;
+    }
+    if (gridFresh && gridNode && gridNode.isConnected) return gridNode;
+    if (gridFresh && !gridNode) return null;
+    gridNode = document.querySelector(".cards-grid, .card-grid, .cards--grid");
+    gridFresh = true;
+    return gridNode;
   }
 
   function listedCards() {
@@ -401,6 +449,102 @@
   }
 
   let holdSelection = false;
+  let holdDepth = 0;
+  const moveEpoch = new Map();
+
+  function pushHold() {
+    holdDepth += 1;
+    holdSelection = true;
+  }
+
+  function popHold() {
+    holdDepth = Math.max(0, holdDepth - 1);
+    holdSelection = holdDepth > 0;
+  }
+
+  function beginMove(number) {
+    const key = String(number);
+    const epoch = (moveEpoch.get(key) || 0) + 1;
+    moveEpoch.set(key, epoch);
+    return epoch;
+  }
+
+  function moveIsCurrent(number, epoch) {
+    return moveEpoch.get(String(number)) === epoch;
+  }
+
+  function parkNeighbor(card) {
+    if (parked.has(card)) return;
+    const next = card.nextElementSibling;
+    if (next && next.tagName === "ARTICLE") {
+      parked.set(card, next);
+      return;
+    }
+    const prev = card.previousElementSibling;
+    if (prev && prev.tagName === "ARTICLE") {
+      parked.set(card, prev);
+      return;
+    }
+    parked.set(card, null);
+  }
+
+  function boardUrl() {
+    const back = document.querySelector("[data-back]");
+    if (back && back.getAttribute("href")) return back.getAttribute("href");
+    const root = boardRoot();
+    if (root && root.dataset.board) return slug + "/boards/" + root.dataset.board;
+    return null;
+  }
+
+  function relocateCard(card, column) {
+    const list = column && column.querySelector(".cards__list");
+    if (!card || !list || list.contains(card)) return null;
+    parkNeighbor(card);
+    const parent = card.parentNode;
+    const next = card.nextSibling;
+    const source = card.closest("section.cards");
+    const home = boardUrl();
+    invalidateLists();
+    if (card.classList.contains("golden-effect")) list.prepend(card);
+    else list.appendChild(card);
+    recount(source);
+    recount(column);
+    return {
+      boardUrl: home,
+      undo: function () {
+        parked.delete(card);
+        if (!card.isConnected || !parent || !parent.isConnected) return;
+        invalidateLists();
+        if (next && next.parentNode === parent) parent.insertBefore(card, next);
+        else parent.appendChild(card);
+        recount(source);
+        recount(column);
+      },
+    };
+  }
+
+  function detachCard(card) {
+    if (!card || !card.parentNode) return null;
+    parkNeighbor(card);
+    const parent = card.parentNode;
+    const next = card.nextSibling;
+    const source = card.closest("section.cards");
+    const home = boardUrl();
+    invalidateLists();
+    card.remove();
+    recount(source);
+    return {
+      boardUrl: home,
+      undo: function () {
+        parked.delete(card);
+        if (card.isConnected || !parent || !parent.isConnected) return;
+        invalidateLists();
+        if (next && next.parentNode === parent) parent.insertBefore(card, next);
+        else parent.appendChild(card);
+        recount(source);
+      },
+    };
+  }
 
   function laneColumn(lane) {
     if (!lane) return null;
@@ -430,13 +574,16 @@
     const current = document.querySelector('article.card[data-number="' + payload.number + '"]');
     const sourceColumn = current && current.closest("section.cards");
     let neighbor = null;
-    if (current) {
+    if (current && parked.has(current)) {
+      neighbor = parked.get(current);
+      parked.delete(current);
+    } else if (current) {
       neighbor = current.nextElementSibling && current.nextElementSibling.matches("article.card")
         ? current.nextElementSibling
         : current.previousElementSibling;
       if (neighbor && !neighbor.matches("article.card")) neighbor = null;
-      current.replaceWith(fresh);
     }
+    if (current) current.replaceWith(fresh);
     const target = laneColumn(payload.lane);
     const list = target && target.querySelector(".cards__list");
     if (list && !list.contains(fresh)) {
@@ -467,7 +614,7 @@
     else selectCard(null);
   }
 
-  function post(url, fields) {
+  function post(url, fields, move) {
     const body = new FormData();
     body.append("csrf_token", csrf);
     if (fields) {
@@ -476,25 +623,27 @@
       });
     }
     const headers = {};
-    if (boardRoot() || document.querySelector(".cards-grid, .card-grid, .cards--grid")) headers["X-Fizzy-Fragment"] = "card";
+    if (boardRoot() || gridElement()) headers["X-Fizzy-Fragment"] = "card";
     return fetch(url, { method: "POST", body: body, credentials: "same-origin", headers: headers }).then(function (response) {
       if (!response.ok) {
         window.alert("Could not update that card.");
-        return;
+        return null;
       }
       const type = response.headers.get("content-type") || "";
       if (type.indexOf("application/json") >= 0) {
         return response.json().then(function (payload) {
-          if (payload && payload.html) placeCard(payload);
+          const current = !move || moveIsCurrent(move.number, move.epoch);
+          if (current && payload && payload.html) placeCard(payload);
+          if (current && payload) noteMutation((payload && payload.number) || (move && move.number));
           return payload;
         });
       }
       window.location.reload();
+      return null;
     });
   }
 
   let navToken = 0;
-  let movingCard = false;
 
   function surfaceUrl(url) {
     let parsed;
@@ -533,6 +682,8 @@
     watchCardLists(document.getElementById("board-stage"));
     watchCardLists(document.getElementById("cards_container"));
     bindSurfaceFilters();
+    const back = document.querySelector("[data-back]");
+    if (back) schedulePrefetch(back.getAttribute("href"));
     const root = document.getElementById("main");
     paintBubbles(root);
     rememberDescription(root);
@@ -560,28 +711,195 @@
     chooseFallback();
   }
 
-  function applyDocument(html, url, options) {
-    options = options || {};
+  const surfaceCache = new Map();
+  const SURFACE_LIMIT = 8;
+  const inflightHtml = new Map();
+  const SLOT_SELECTORS = [".header__actions--start", ".header__title", ".header__actions--end"];
+  let currentKey = "";
+  let boardPreview = false;
+  let prefetchTimer = 0;
+  let prefetchHref = "";
+
+  function cacheKey(url) {
+    const parsed = new URL(url, window.location.href);
+    let path = parsed.pathname;
+    if (path.length > 1 && path.charAt(path.length - 1) === "/") path = path.slice(0, -1);
+    return path + parsed.search;
+  }
+
+  function rememberSnap(key, snap) {
+    if (!key || !snap) return;
+    surfaceCache.delete(key);
+    surfaceCache.set(key, snap);
+    while (surfaceCache.size > SURFACE_LIMIT) {
+      const oldest = surfaceCache.keys().next().value;
+      surfaceCache.delete(oldest);
+    }
+  }
+
+  function takeSnapshot() {
+    const main = document.getElementById("main");
+    if (!main) return null;
+    const header = document.getElementById("header");
+    const slots = {};
+    for (let index = 0; index < SLOT_SELECTORS.length; index += 1) {
+      const selector = SLOT_SELECTORS[index];
+      const node = document.querySelector(selector);
+      slots[selector] = node ? node.innerHTML : "";
+    }
+    return {
+      main: main.cloneNode(true),
+      title: document.title,
+      bodyClass: document.body.className,
+      headerClass: header ? header.className : "",
+      slots: slots,
+      flash: null,
+      slug: document.body.dataset.slug || "",
+      dirty: false,
+      live: true,
+    };
+  }
+
+  function snapshotFromHtml(html) {
     const doc = new DOMParser().parseFromString(html, "text/html");
     const nextMain = doc.getElementById("main");
+    if (!nextMain || !doc.body || doc.body.dataset.slug !== slug) return null;
+    const slots = {};
+    for (let index = 0; index < SLOT_SELECTORS.length; index += 1) {
+      const selector = SLOT_SELECTORS[index];
+      const src = doc.querySelector(selector);
+      slots[selector] = src ? src.innerHTML : "";
+    }
+    const nextHeader = doc.getElementById("header");
+    const nextFlash = doc.querySelector("#global-container > .flash");
+    return {
+      main: document.importNode(nextMain, true),
+      title: doc.title,
+      bodyClass: doc.body.className,
+      headerClass: nextHeader ? nextHeader.className : "",
+      slots: slots,
+      flash: nextFlash ? document.importNode(nextFlash, true) : null,
+      slug: doc.body.dataset.slug,
+      dirty: false,
+      live: false,
+    };
+  }
+
+  function captureSurface() {
+    if (boardPreview) return;
+    if (!currentKey || !surfaceUrl(window.location.href)) return;
+    const snap = takeSnapshot();
+    if (!snap) return;
+    rememberSnap(currentKey, snap);
+  }
+
+  function markDirtyUrl(url) {
+    if (!url || !surfaceUrl(url)) return;
+    const key = cacheKey(url);
+    const hit = surfaceCache.get(key);
+    if (hit) hit.dirty = true;
+  }
+
+  function noteMutation(number) {
+    if (number) markDirtyUrl(slug + "/cards/" + number);
+    const home = boardUrl();
+    if (home) markDirtyUrl(home);
+    if (boardPreview) {
+      const hit = currentKey && surfaceCache.get(currentKey);
+      if (hit) hit.dirty = true;
+      return;
+    }
+    captureSurface();
+  }
+
+  function fetchHtml(url) {
+    const key = cacheKey(url);
+    const pending = inflightHtml.get(key);
+    if (pending) return pending;
+    const job = fetch(new URL(url, window.location.href).href, {
+      headers: { Accept: "text/html" },
+      credentials: "same-origin",
+    }).then(function (response) {
+      if (!response.ok) {
+        const error = new Error("fetch");
+        error.status = response.status;
+        error.href = response.url || url;
+        throw error;
+      }
+      return response.text().then(function (html) {
+        return { html: html, url: response.url || url };
+      });
+    }).finally(function () {
+      inflightHtml.delete(key);
+    });
+    inflightHtml.set(key, job);
+    return job;
+  }
+
+  function warmSurface(url, key) {
+    if (key === currentKey) return;
+    const existing = surfaceCache.get(key);
+    if (existing && !existing.dirty) return;
+    fetchHtml(url).then(function (result) {
+      if (!result || key === currentKey) return;
+      const latest = surfaceCache.get(key);
+      if (latest && !latest.dirty && latest.live) return;
+      const snap = snapshotFromHtml(result.html);
+      if (!snap) return;
+      const again = surfaceCache.get(key);
+      if (again && !again.dirty && again.live) return;
+      rememberSnap(key, snap);
+    }).catch(function () {});
+  }
+
+  function schedulePrefetch(url) {
+    if (!url || !surfaceUrl(url)) return;
+    let key = "";
+    try { key = cacheKey(url); }
+    catch (error) { return; }
+    if (key === currentKey) return;
+    const hit = surfaceCache.get(key);
+    if (hit && !hit.dirty) return;
+    if (url === prefetchHref) return;
+    prefetchHref = url;
+    window.clearTimeout(prefetchTimer);
+    prefetchTimer = window.setTimeout(function () {
+      prefetchTimer = 0;
+      const href = prefetchHref;
+      prefetchHref = "";
+      if (!href) return;
+      let nextKey = "";
+      try { nextKey = cacheKey(href); }
+      catch (error) { return; }
+      warmSurface(href, nextKey);
+    }, 110);
+  }
+
+  function applySnapshot(snap, url, options) {
+    options = options || {};
     const main = document.getElementById("main");
-    if (!nextMain || !main || !doc.body || doc.body.dataset.slug !== slug) return false;
+    if (!snap || !snap.main || !main || snap.slug !== slug) return false;
+    let nextKey = currentKey;
+    try { nextKey = cacheKey(url); }
+    catch (error) { nextKey = currentKey; }
     document.querySelectorAll("dialog[open]").forEach(function (dialog) { dialog.close(); });
+    if (nextKey !== currentKey) captureSurface();
+    boardPreview = false;
+    if (filterAbort) filterAbort.abort();
+    filterGeneration += 1;
     const flash = document.querySelector("#global-container > .flash");
     if (flash) flash.remove();
-    const nextFlash = doc.querySelector("#global-container > .flash");
-    if (nextFlash && main.parentNode) main.parentNode.insertBefore(document.importNode(nextFlash, true), main);
-    main.replaceWith(document.importNode(nextMain, true));
+    if (snap.flash && main.parentNode) main.parentNode.insertBefore(snap.flash.cloneNode(true), main);
+    main.replaceWith(snap.main.cloneNode(true));
     const header = document.getElementById("header");
-    const nextHeader = doc.getElementById("header");
-    if (header && nextHeader) header.className = nextHeader.className;
-    [".header__actions--start", ".header__title", ".header__actions--end"].forEach(function (selector) {
+    if (header) header.className = snap.headerClass;
+    for (let index = 0; index < SLOT_SELECTORS.length; index += 1) {
+      const selector = SLOT_SELECTORS[index];
       const dest = document.querySelector(selector);
-      const src = doc.querySelector(selector);
-      if (dest) dest.innerHTML = src ? src.innerHTML : "";
-    });
-    document.body.className = doc.body.className;
-    if (doc.title) document.title = doc.title;
+      if (dest) dest.innerHTML = snap.slots[selector] || "";
+    }
+    document.body.className = snap.bodyClass;
+    if (snap.title) document.title = snap.title;
     invalidateLists();
     selectedNode = null;
     selectedColumn = null;
@@ -597,9 +915,20 @@
         card: options.restoreCard || null,
       }, "", url);
     }
+    currentKey = nextKey;
     bootSurface(options.restoreCard, hash);
     window.scrollTo(0, 0);
     return true;
+  }
+
+  function applyDocument(html, url, options) {
+    const snap = snapshotFromHtml(html);
+    if (!snap) return false;
+    let key = "";
+    try { key = cacheKey(url); }
+    catch (error) { key = ""; }
+    if (key) rememberSnap(key, snap);
+    return applySnapshot(snap, url, options);
   }
 
   function showPage(url, options) {
@@ -611,25 +940,42 @@
       window.location.assign(url);
       return Promise.resolve(null);
     }
-    return fetch(requested.href, {
-      headers: { Accept: "text/html" },
-      credentials: "same-origin",
-    }).then(function (response) {
-      if (token !== navToken) return null;
-      if (!response.ok) {
+    const key = cacheKey(requested.href);
+    const display = requested.pathname + requested.search + requested.hash;
+    const cached = surfaceCache.get(key);
+    let painted = false;
+    let paintOptions = options;
+    if (cached && cached.main) {
+      const stamp = interactionStamp;
+      if (!applySnapshot(cached, display, options)) {
         window.location.assign(requested.href);
+        return Promise.resolve(null);
+      }
+      painted = true;
+      if (!cached.dirty) return Promise.resolve(true);
+      paintOptions = Object.assign({}, options, { push: false, revalidateStamp: stamp });
+    }
+    return fetchHtml(requested.href).then(function (result) {
+      if (token !== navToken || !result) return null;
+      const snap = snapshotFromHtml(result.html);
+      const finalUrl = new URL(result.url || requested.href, window.location.href);
+      if (requested.hash) finalUrl.hash = requested.hash;
+      const finalKey = cacheKey(finalUrl.href);
+      const finalDisplay = finalUrl.pathname + finalUrl.search + finalUrl.hash;
+      if (!snap) {
+        if (!painted) window.location.assign(finalUrl.href);
         return null;
       }
-      return response.text().then(function (html) {
-        if (token !== navToken) return null;
-        const finalUrl = new URL(response.url || requested.href, window.location.href);
-        if (requested.hash) finalUrl.hash = requested.hash;
-        const display = finalUrl.pathname + finalUrl.search + finalUrl.hash;
-        if (!applyDocument(html, display, options)) window.location.assign(finalUrl.href);
+      if (painted && paintOptions.revalidateStamp !== undefined && interactionStamp !== paintOptions.revalidateStamp) {
+        snap.dirty = true;
+        rememberSnap(finalKey, snap);
         return true;
-      });
+      }
+      rememberSnap(finalKey, snap);
+      if (!applySnapshot(snap, finalDisplay, paintOptions) && !painted) window.location.assign(finalUrl.href);
+      return true;
     }).catch(function () {
-      if (token === navToken) window.location.assign(requested.href);
+      if (token === navToken && !painted) window.location.assign(requested.href);
     });
   }
 
@@ -821,12 +1167,12 @@
     if (event.relatedTarget && card.contains(event.relatedTarget)) return;
     const column = card.closest("section.cards");
     if (column && column.classList.contains("is-collapsed")) return;
-    selectCard(card);
+    selectCard(card, undefined, true);
   });
 
   function watchCardLists(root) {
-    if (!root || root.dataset.listWatch) return;
-    root.dataset.listWatch = "1";
+    if (!root || watchedLists.has(root)) return;
+    watchedLists.add(root);
     new MutationObserver(invalidateLists).observe(root, { childList: true, subtree: true });
   }
 
@@ -1014,6 +1360,8 @@
     if (link) link.click();
   });
 
+  let dropHover = null;
+
   document.addEventListener("dragstart", function (event) {
     const card = event.target.closest && event.target.closest("article.card");
     if (!card || card.getAttribute("draggable") !== "true") return;
@@ -1023,26 +1371,47 @@
   });
 
   document.addEventListener("dragend", function () {
-    document.querySelectorAll("article.card.drag-and-drop__dragged-item, section.cards.drag-and-drop__hover-container").forEach(function (node) {
-      node.classList.remove("drag-and-drop__dragged-item", "drag-and-drop__hover-container");
-    });
+    dropHover = null;
+    const nodes = document.querySelectorAll("article.card.drag-and-drop__dragged-item, section.cards.drag-and-drop__hover-container");
+    for (let index = 0; index < nodes.length; index += 1) {
+      nodes[index].classList.remove("drag-and-drop__dragged-item", "drag-and-drop__hover-container");
+    }
   });
 
   document.addEventListener("dragover", function (event) {
     const column = event.target.closest && event.target.closest("section.cards");
     if (!column || (!column.dataset.columnId && !column.dataset.lane)) return;
     event.preventDefault();
+    if (dropHover === column) return;
+    if (dropHover && dropHover.isConnected) dropHover.classList.remove("drag-and-drop__hover-container");
     column.classList.add("drag-and-drop__hover-container");
+    dropHover = column;
   });
 
   document.addEventListener("drop", function (event) {
     const column = event.target.closest && event.target.closest("section.cards");
     if (!column || (!column.dataset.columnId && !column.dataset.lane)) return;
     event.preventDefault();
+    if (dropHover && dropHover.isConnected) dropHover.classList.remove("drag-and-drop__hover-container");
+    dropHover = null;
     column.classList.remove("drag-and-drop__hover-container");
     const number = event.dataTransfer.getData("text/plain");
+    const card = number && document.querySelector('article.card[data-number="' + number + '"]');
     const move = columnMoveFields(column, number);
-    if (move) post(move.url, move.fields);
+    if (!move || !card) return;
+    const epoch = beginMove(number);
+    const relocated = relocateCard(card, column);
+    post(move.url, move.fields, { epoch: epoch, number: number }).then(function (payload) {
+      if (!moveIsCurrent(number, epoch)) return;
+      if (!payload && relocated) {
+        relocated.undo();
+        if (relocated.boardUrl) markDirtyUrl(relocated.boardUrl);
+      }
+    }, function () {
+      if (!moveIsCurrent(number, epoch)) return;
+      if (relocated) relocated.undo();
+      window.alert("Could not update that card.");
+    });
   });
 
   const bar = document.querySelector(".bar");
@@ -1071,88 +1440,181 @@
   if (barInput && barInput.value) openSearch();
 
   let searchGeneration = 0;
+  let searchAbort = null;
+  let searchPaint = 0;
   let lastSearchCards = null;
-  function renderSearch(cards) {
-    lastSearchCards = cards || [];
+
+  function paintSearch(cards) {
     if (!barResults) return;
     if (!cards.length) {
       barResults.innerHTML = '<p class="blank-slate">No matches.</p>';
     } else {
-      barResults.innerHTML = "<ul>" + cards.map(function (card) {
+      let html = "<ul>";
+      for (let index = 0; index < cards.length; index += 1) {
+        const card = cards[index];
         const boardName = card.board && card.board.name ? card.board.name : "";
-        return '<li><a class="search__result" href="' + escapeHtml(card.url) + '"><h3 class="search__title">#' + escapeHtml(card.number) + " " + escapeHtml(card.title || "Untitled") + "</h3><div class=\"search__excerpt\">" + escapeHtml((card.description || "").slice(0, 180)) + "</div><div class=\"overflow-ellipsis translucent\">" + escapeHtml(boardName) + "</div></a></li>";
-      }).join("") + "</ul>";
+        html += '<li><a class="search__result" href="' + escapeHtml(card.url) + '"><h3 class="search__title">#' + escapeHtml(card.number) + " " + escapeHtml(card.title || "Untitled") + "</h3><div class=\"search__excerpt\">" + escapeHtml((card.description || "").slice(0, 180)) + "</div><div class=\"overflow-ellipsis translucent\">" + escapeHtml(boardName) + "</div></a></li>";
+      }
+      html += "</ul>";
+      barResults.innerHTML = html;
     }
     if (barModal && !barModal.open) barModal.show();
+  }
+
+  function renderSearch(cards, sync) {
+    lastSearchCards = cards || [];
+    if (sync) {
+      if (searchPaint) {
+        cancelAnimationFrame(searchPaint);
+        searchPaint = 0;
+      }
+      paintSearch(lastSearchCards);
+      return;
+    }
+    if (searchPaint) return;
+    searchPaint = requestAnimationFrame(function () {
+      searchPaint = 0;
+      paintSearch(lastSearchCards);
+    });
   }
 
   if (barInput) {
     barInput.addEventListener("input", function () {
       const query = barInput.value.trim();
       const generation = ++searchGeneration;
+      window.clearTimeout(barInput.searchTimer);
+      if (searchAbort) searchAbort.abort();
       if (!query || !slug) {
         if (barModal && barModal.open) barModal.close();
         if (barResults) barResults.innerHTML = "";
+        lastSearchCards = null;
         return;
       }
-      window.setTimeout(function () {
+      barInput.searchTimer = window.setTimeout(function () {
         if (generation !== searchGeneration) return;
+        const controller = new AbortController();
+        searchAbort = controller;
         fetch(slug + "/search?q=" + encodeURIComponent(query), {
           headers: { Accept: "application/json" },
           credentials: "same-origin",
+          signal: controller.signal,
         }).then(function (response) {
           return response.json();
         }).then(function (payload) {
           if (generation !== searchGeneration) return;
           renderSearch((payload && payload.cards) || []);
+        }).catch(function (error) {
+          if (error && error.name === "AbortError") return;
         });
-      }, 180);
+      }, 160);
     });
   }
 
   const jumpFilter = document.querySelector("[data-jump-filter]");
+  let jumpPaint = 0;
   if (jumpFilter) {
     jumpFilter.addEventListener("input", function () {
       const query = jumpFilter.value.trim().toLowerCase();
-      document.querySelectorAll("[data-jump-list] a").forEach(function (link) {
-        link.hidden = !!query && !link.textContent.toLowerCase().includes(query);
+      if (jumpPaint) cancelAnimationFrame(jumpPaint);
+      jumpPaint = requestAnimationFrame(function () {
+        jumpPaint = 0;
+        const links = document.querySelectorAll("[data-jump-list] a");
+        for (let index = 0; index < links.length; index += 1) {
+          const link = links[index];
+          const text = link.textContent ? link.textContent.toLowerCase() : "";
+          link.hidden = !!query && text.indexOf(query) === -1;
+        }
       });
     });
   }
 
   let filterGeneration = 0;
-  function refreshBoard() {
-    const filterForm = document.querySelector(".board-filters");
+  let filterAbort = null;
+  let filterTimer = 0;
+  let popupPaint = 0;
+
+  function activeFilterForm() {
+    return document.querySelector("aside.filters form");
+  }
+
+  function filterParams(form) {
+    const params = new URLSearchParams(new FormData(form));
+    const terms = params.getAll("terms[]");
+    params.delete("terms[]");
+    for (let index = 0; index < terms.length; index += 1) {
+      if (terms[index].trim()) params.append("terms[]", terms[index]);
+    }
+    return params;
+  }
+
+  function previewIsActive(params, typed) {
+    if (typed && typed.value.trim()) return true;
+    if ((params.get("indexed_by") || "all") !== "all") return true;
+    if ((params.get("sorted_by") || "latest") !== "latest") return true;
+    if (params.get("assignment_status")) return true;
+    if (params.get("creation") || params.get("closure") || params.get("q")) return true;
+    const lists = ["assignee_ids[]", "creator_ids[]", "closer_ids[]", "tag_ids[]", "column_ids[]"];
+    for (let index = 0; index < lists.length; index += 1) {
+      if (params.getAll(lists[index]).length) return true;
+    }
+    return false;
+  }
+
+  function runFilterPreview(form) {
     const stage = document.getElementById("board-stage");
-    if (!filterForm || !stage) return;
+    if (!form || !stage || !form.isConnected) return;
+    if (filterAbort) filterAbort.abort();
+    const controller = new AbortController();
+    filterAbort = controller;
     const generation = ++filterGeneration;
-    const params = new URLSearchParams(new FormData(filterForm));
-    fetch(filterForm.action + "?" + params.toString(), {
+    const params = filterParams(form);
+    const typed = form.querySelector(".filter__terms");
+    const action = form.getAttribute("action") || form.action;
+    fetch(action + "?" + params.toString(), {
       headers: { "X-Fizzy-Fragment": "board", Accept: "text/html" },
       credentials: "same-origin",
+      signal: controller.signal,
     }).then(function (response) {
+      if (!response.ok) return "";
       return response.text();
     }).then(function (html) {
+      if (!html) return;
       if (generation !== filterGeneration) return;
-      const current = document.getElementById("board-stage");
-      if (!current || current !== stage) return;
-      current.innerHTML = html;
-      invalidateLists();
-      if (boardRoot()) restoreColumns();
-      else chooseFallback();
-      paintBubbles(current);
+      requestAnimationFrame(function () {
+        if (generation !== filterGeneration) return;
+        const current = document.getElementById("board-stage");
+        if (!current || !form.isConnected) return;
+        current.innerHTML = html;
+        boardPreview = previewIsActive(params, typed);
+        invalidateLists();
+        if (boardRoot()) restoreColumns();
+        else chooseFallback();
+        paintBubbles(current);
+        if (!boardPreview) captureSurface();
+      });
+    }).catch(function (error) {
+      if (error && error.name === "AbortError") return;
     });
   }
 
+  function scheduleFilterPreview(form) {
+    window.clearTimeout(filterTimer);
+    filterTimer = window.setTimeout(function () {
+      filterTimer = 0;
+      runFilterPreview(form);
+    }, 150);
+  }
+
   function bindSurfaceFilters() {
-    const form = document.querySelector(".board-filters");
-    if (!form || form.dataset.liveFilter) return;
-    form.dataset.liveFilter = "1";
+    const form = activeFilterForm();
+    if (!form || watchedFilters.has(form)) return;
+    watchedFilters.add(form);
     form.addEventListener("input", function (event) {
-      if (event.target && event.target.name === "q") refreshBoard();
+      if (!event.target || !event.target.classList.contains("filter__terms")) return;
+      scheduleFilterPreview(form);
     });
     form.addEventListener("change", function (event) {
-      if (event.target && event.target.type === "checkbox") refreshBoard();
+      if (event.target && event.target.type === "checkbox") scheduleFilterPreview(form);
     });
   }
 
@@ -1195,6 +1657,8 @@
         desc.dataset.originalHtml = desc.innerHTML.trim();
         desc.dataset.originalPlain = desc.innerText.replace(/\s+/g, " ").trim();
       }
+      const number = (window.location.pathname.match(/\/cards\/(\d+)\/?$/) || [])[1];
+      noteMutation(number);
       return true;
     });
   }
@@ -1221,6 +1685,8 @@
         return '<div class="tray__item tray__item--pin"><a class="card" href="' + slug + "/cards/" + pin.number + '" style="--card-color: var(--color-card-2)"><div class="card__body"><h3 class="card__title">' + escapeHtml(pin.title) + "</h3></div></a></div>";
       }).join("");
     }
+    const number = (window.location.pathname.match(/\/cards\/(\d+)\/?$/) || [])[1];
+    noteMutation(payload.number || number);
     if (payload.anchor) {
       const node = document.getElementById(String(payload.anchor).replace("#", ""));
       if (node) node.scrollIntoView({ block: "nearest" });
@@ -1237,6 +1703,7 @@
     if (boardRoot()) restoreColumns();
     else chooseFallback();
     paintBubbles(stage);
+    noteMutation(null);
   }
 
   function postForm(form, submitter, headers) {
@@ -1264,9 +1731,15 @@
     const dialog = field.closest("dialog");
     if (!dialog) return;
     const query = field.value.trim().toLowerCase();
-    dialog.querySelectorAll(".popup__item").forEach(function (item) {
-      const text = (item.textContent || "").toLowerCase();
-      item.hidden = !item.hasAttribute("data-popup-keep") && !!query && text.indexOf(query) === -1;
+    if (popupPaint) cancelAnimationFrame(popupPaint);
+    popupPaint = requestAnimationFrame(function () {
+      popupPaint = 0;
+      const items = dialog.querySelectorAll(".popup__item");
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index];
+        const text = (item.textContent || "").toLowerCase();
+        item.hidden = !item.hasAttribute("data-popup-keep") && !!query && text.indexOf(query) === -1;
+      }
     });
   });
 
@@ -1276,9 +1749,69 @@
     if (event.target.matches("[name='card[title]'], .card__description")) saveCardFields(form);
   });
 
+  function optimisticStage(form, submitter) {
+    const stages = document.querySelector("#card-sheet .card__stages");
+    if (!stages || !form) return null;
+    const action = form.getAttribute("action") || "";
+    if (action.indexOf("/closure") === -1 && action.indexOf("/not_now") === -1 && action.indexOf("/triage") === -1) return null;
+    let button = submitter && stages.contains(submitter) ? submitter : null;
+    if (!button) {
+      const method = form.querySelector("[name='_method']");
+      const deleting = method && method.value === "delete";
+      if (action.indexOf("/not_now") !== -1) button = stages.querySelector("[data-hotkey='postpone']");
+      else if (action.indexOf("/closure") !== -1 && !deleting) button = stages.querySelector("[data-hotkey='done']");
+      else if (action.indexOf("/triage") !== -1 && deleting) button = stages.querySelector(".card__column-name--stream");
+      else if (action.indexOf("/triage") !== -1 && submitter && submitter.name === "column_id") {
+        const buttons = stages.querySelectorAll("button[name='column_id']");
+        for (let index = 0; index < buttons.length; index += 1) {
+          if (buttons[index].value === submitter.value) {
+            button = buttons[index];
+            break;
+          }
+        }
+      }
+    }
+    if (!button || !stages.contains(button)) return null;
+    const previous = [];
+    const names = stages.querySelectorAll(".card__column-name");
+    for (let index = 0; index < names.length; index += 1) {
+      previous.push({
+        node: names[index],
+        current: names[index].classList.contains("card__column-name--current"),
+        disabled: names[index].disabled,
+      });
+    }
+    for (let index = 0; index < previous.length; index += 1) {
+      const on = previous[index].node === button;
+      previous[index].node.classList.toggle("card__column-name--current", on);
+      if (previous[index].node.tagName === "BUTTON") previous[index].node.disabled = on;
+    }
+    return function () {
+      for (let index = 0; index < previous.length; index += 1) {
+        previous[index].node.classList.toggle("card__column-name--current", previous[index].current);
+        if (previous[index].node.tagName === "BUTTON") previous[index].node.disabled = previous[index].disabled;
+      }
+    };
+  }
+
   document.addEventListener("submit", function (event) {
     const form = event.target;
-    if (!form || form.classList.contains("danger") || form.hasAttribute("data-native-submit") || (form.getAttribute("method") || "").toLowerCase() === "dialog") return;
+    if (!form || form.hasAttribute("data-native-submit") || (form.getAttribute("method") || "").toLowerCase() === "dialog") return;
+    if (form.classList.contains("danger")) {
+      const label = (form.querySelector("button") || {}).textContent || "this";
+      if (!window.confirm("Continue and " + label.trim().toLowerCase() + "?")) event.preventDefault();
+      return;
+    }
+    if (form.querySelector(".filter__terms") && surfaceUrl(form.action)) {
+      event.preventDefault();
+      event.stopPropagation();
+      const typed = form.querySelector(".filter__terms");
+      const params = filterParams(form);
+      if (typed && typed.disabled) typed.disabled = false;
+      const action = form.getAttribute("action") || form.action;
+      openSurface(action + "?" + params.toString(), { force: true });
+      return;
+    }
     if (form.hasAttribute("data-add-card")) {
       event.preventDefault();
       event.stopPropagation();
@@ -1330,6 +1863,7 @@
         recount(column);
         paintBubble(card.querySelector(".bubble"));
         selectCard(card);
+        noteMutation(card.dataset.number);
         const input = form.querySelector("[name='card[title]']");
         if (input) {
           input.value = "";
@@ -1353,6 +1887,7 @@
       (edit.querySelector("[name='card[title]']") && edit.querySelector("[name='card[title]']").value !== edit.querySelector("[name='card[title]']").defaultValue)
       || (edit.querySelector(".card__description") && descriptionChanged(edit.querySelector(".card__description")))
     );
+    const undoStage = optimisticStage(form, submitter);
     const send = function () {
       if (form.classList.contains("card__edit")) {
         const desc = form.querySelector(".card__description");
@@ -1374,6 +1909,10 @@
         return response.json();
       }).then(function (payload) {
         if (payload) applyCardSheet(payload);
+        else if (undoStage) undoStage();
+      }, function () {
+        if (undoStage) undoStage();
+        window.alert("Could not update that card.");
       });
     };
     if (pending) {
@@ -1539,21 +2078,42 @@
     const jobs = [];
     slice.forEach(function (card) {
       const url = kind === "done" ? card.dataset.closureUrl : card.dataset.notNowUrl;
-      if (url) jobs.push(url);
+      if (url) jobs.push({ url: url, card: card });
     });
     if (!jobs.length) return;
-    holdSelection = true;
+    const target = laneColumn(kind === "done" ? "closed" : "not_now");
+    const undos = [];
+    jobs.forEach(function (job) {
+      const moved = target ? relocateCard(job.card, target) : detachCard(job.card);
+      if (moved) undos.push(moved);
+    });
+    pushHold();
+    selectAfterMove(source, successor);
+    const selectionMark = selectionEpoch;
     let chain = Promise.resolve();
-    jobs.forEach(function (url) {
+    let failed = false;
+    jobs.forEach(function (job) {
       chain = chain.then(function () {
-        return post(url);
+        if (failed) return null;
+        const number = job.card.dataset.number;
+        const epoch = beginMove(number);
+        return post(job.url, null, { epoch: epoch, number: number }).then(function (payload) {
+          if (!moveIsCurrent(number, epoch)) return payload;
+          if (!payload) {
+            failed = true;
+            undos.forEach(function (item) { item.undo(); });
+          }
+          return payload;
+        });
       });
     });
     chain.then(function () {
-      holdSelection = false;
-      selectAfterMove(source, successor);
+      popHold();
+      if (selectionEpoch === selectionMark) selectAfterMove(source, successor);
     }, function () {
-      holdSelection = false;
+      popHold();
+      undos.forEach(function (item) { item.undo(); });
+      window.alert("Could not update that card.");
       chooseFallback();
     });
   }
@@ -1644,7 +2204,6 @@
       else button.click();
       return;
     }
-    if (movingCard) return;
     const list = moveLists();
     const card = selectedCard();
     if (!list.length || !card) return;
@@ -1658,16 +2217,26 @@
     const cards = visibleCards(current);
     const cardIndex = cards.indexOf(card);
     const successor = cards[cardIndex + 1] || cards[cardIndex - 1] || null;
-    movingCard = true;
-    holdSelection = true;
-    post(move.url, move.fields).then(function () {
-      holdSelection = false;
-      selectAfterMove(current, successor);
-    }).catch(function () {
-      holdSelection = false;
+    const number = card.dataset.number;
+    const epoch = beginMove(number);
+    const relocated = relocateCard(card, list[destIndex]);
+    pushHold();
+    selectAfterMove(current, successor);
+    const selectionMark = selectionEpoch;
+    post(move.url, move.fields, { epoch: epoch, number: number }).then(function (payload) {
+      popHold();
+      if (!moveIsCurrent(number, epoch)) return;
+      if (!payload && relocated) {
+        relocated.undo();
+        if (relocated.boardUrl) markDirtyUrl(relocated.boardUrl);
+      }
+      if (selectionEpoch === selectionMark) selectAfterMove(current, successor);
+    }, function () {
+      popHold();
+      if (!moveIsCurrent(number, epoch)) return;
+      if (relocated) relocated.undo();
+      window.alert("Could not update that card.");
       chooseFallback();
-    }).then(function () {
-      movingCard = false;
     });
   }
 
@@ -1675,7 +2244,7 @@
     if (!lastSearchCards || !lastSearchCards.length || !barResults) return;
     if (!barResults.querySelector(".search__result")) {
       if (barField && barField.hidden) openSearch();
-      renderSearch(lastSearchCards);
+      renderSearch(lastSearchCards, true);
     } else if (barModal && !barModal.open) barModal.show();
     moveLinks(barResults, direction);
   }
@@ -2000,17 +2569,12 @@
     }
   });
 
-  document.querySelectorAll("form.danger").forEach(function (form) {
-    form.addEventListener("submit", function (event) {
-      const label = (form.querySelector("button") || {}).textContent || "this";
-      if (!window.confirm("Continue and " + label.trim().toLowerCase() + "?")) event.preventDefault();
-    });
-  });
-
   if ("scrollRestoration" in history) history.scrollRestoration = "manual";
   if (!history.state || !history.state.fizzy) {
     history.replaceState({ fizzy: true, depth: 0 }, "", window.location.href);
   }
+  try { currentKey = cacheKey(window.location.href); }
+  catch (error) { currentKey = ""; }
   window.addEventListener("popstate", function (event) {
     const state = event.state;
     if (!state || !state.fizzy) return;
@@ -2020,6 +2584,7 @@
     });
   });
   bootSurface(history.state && history.state.card, window.location.hash);
+  captureSurface();
 
   document.documentElement.dataset.fizzyReady = "1";
 })();
