@@ -1888,6 +1888,9 @@
       || (edit.querySelector(".card__description") && descriptionChanged(edit.querySelector(".card__description")))
     );
     const undoStage = optimisticStage(form, submitter);
+    const releaseSubmit = function () {
+      if (form.dataset.submitting) delete form.dataset.submitting;
+    };
     const send = function () {
       if (form.classList.contains("card__edit")) {
         const desc = form.querySelector(".card__description");
@@ -1913,15 +1916,18 @@
       }, function () {
         if (undoStage) undoStage();
         window.alert("Could not update that card.");
-      });
+      }).then(releaseSubmit, releaseSubmit);
     };
     if (pending) {
       saveCardFields(edit).then(function (ok) {
         if (!ok) {
           window.alert("Could not save the card before that change.");
+          releaseSubmit();
           return;
         }
         send();
+      }, function () {
+        releaseSubmit();
       });
       return;
     }
@@ -1958,6 +1964,7 @@
     ["dn", "Not now. Same count as dd."],
     [".", "Repeat the last dd or dn on the selected card."],
     ["o", "Add a card in Maybe."],
+    ["Enter", "Create the new card from its title."],
     ["i", "Edit the title. From a board, open the card first."],
     ["/", "Search."],
     ["n N", "Next or previous search hit."],
@@ -2152,6 +2159,16 @@
     if (composer && composer.requestSubmit) composer.requestSubmit();
   }
 
+  function submitNewCard(field) {
+    const title = (field.value || "").trim();
+    if (!title) return;
+    const create = document.querySelector(".card-perma__notch-new-card-buttons form");
+    if (!create || create.dataset.submitting === "1") return;
+    create.dataset.submitting = "1";
+    if (create.requestSubmit) create.requestSubmit();
+    else create.submit();
+  }
+
   function editTitle() {
     if (document.getElementById("card-sheet")) {
       const edit = document.querySelector("[data-hotkey-target='edit']");
@@ -2331,6 +2348,12 @@
     const jump = dialogById("jump");
 
     if (event.target.matches && event.target.matches("[name='card[title]']") && key === "Enter" && plain) {
+      if (event.target.hasAttribute("data-new-card-title")) {
+        if (event.isComposing) return;
+        event.preventDefault();
+        if (!event.repeat) submitNewCard(event.target);
+        return;
+      }
       event.preventDefault();
       event.target.blur();
       return;
@@ -2376,6 +2399,11 @@
     }
 
     if (meta && key === "Enter") {
+      if (event.target.matches && event.target.matches("[data-new-card-title]")) {
+        event.preventDefault();
+        if (!event.repeat && !event.isComposing) submitNewCard(event.target);
+        return;
+      }
       const form = event.target.closest && event.target.closest("form");
       if (form) {
         event.preventDefault();

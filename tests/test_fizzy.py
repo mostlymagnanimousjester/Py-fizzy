@@ -823,6 +823,45 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("Your code is", home_html)
 
 
+    def test_draft_card_title_is_the_keyboard_create_target(self):
+        home = self.client.get("/", follow_redirects=True)
+        home_html = home.get_data(as_text=True)
+        self.assertEqual(home.status_code, 200, home_html)
+        self.assertIn("app.js?v=8", home_html)
+        new_board = re.search(r'href="([^"]+/boards/new)"', home_html).group(1)
+        form = self.client.get(new_board)
+        token = _csrf(form.get_data(as_text=True))
+        made = self.client.post(
+            new_board.replace("/boards/new", "/boards"),
+            data={"csrf_token": token, "board[name]": "Keys"},
+            follow_redirects=False,
+        )
+        board_html = self.client.get(made.location).get_data(as_text=True)
+        card_action = re.search(r'action="([^"]+/cards)"', board_html).group(1)
+        token = _csrf(board_html)
+        draft = self.client.post(card_action, data={"csrf_token": token}, follow_redirects=True)
+        draft_html = draft.get_data(as_text=True)
+        self.assertEqual(draft.status_code, 200, draft_html)
+        self.assertEqual(draft_html.count("data-new-card-title"), 1)
+        self.assertIn('name="card[title]"', draft_html)
+        self.assertIn("Create card", draft_html)
+        self.assertIn('name="comment[body]"', draft_html)
+        self.assertNotIn("data-new-card-title", draft_html.split('name="comment[body]"', 1)[1])
+        named = self.client.post(
+            card_action,
+            data={"csrf_token": token, "card[title]": "Already named"},
+            follow_redirects=True,
+        )
+        named_html = named.get_data(as_text=True)
+        self.assertIn("Already named", named_html)
+        self.assertNotIn("data-new-card-title", named_html)
+        script = self.client.get("/static/app.js")
+        self.assertEqual(script.status_code, 200)
+        source = script.get_data(as_text=True)
+        self.assertIn("Create the new card from its title.", source)
+        self.assertIn("data-new-card-title", source)
+
+
 class SwapTests(unittest.TestCase):
     def test_ruby_blobs_roundtrip_through_the_api(self):
         with tempfile.TemporaryDirectory() as tmp:

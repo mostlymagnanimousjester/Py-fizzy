@@ -111,7 +111,7 @@
               <input type="hidden" name="_method" value="put">
               <h1 class="card__title">
                 <label class="flex flex-column align-center">
-                  <textarea class="card-field__title autoresize__textarea input input--textarea full-width borderless txt-align-start hide-focus-ring hide-scrollbar" name="card[title]" maxlength="255" rows="1" placeholder="Name it…" aria-label="Title" data-hotkey-target="edit">{{ view.card.title or '' }}</textarea>
+                  <textarea class="card-field__title autoresize__textarea input input--textarea full-width borderless txt-align-start hide-focus-ring hide-scrollbar" name="card[title]" maxlength="255" rows="1" placeholder="Name it…" aria-label="Title" data-hotkey-target="edit"{% if view.card.status == "drafted" %} data-new-card-title{% endif %}>{{ view.card.title or '' }}</textarea>
                 </label>
               </h1>
               <div class="card__description lexxy-content" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Description" data-plain="{{ view.description_text }}" data-placeholder="Add some notes, context, pictures, or video about this…">{{ view.description_html|safe }}</div>
