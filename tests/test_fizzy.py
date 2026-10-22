@@ -827,7 +827,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/", follow_redirects=True)
         home_html = home.get_data(as_text=True)
         self.assertEqual(home.status_code, 200, home_html)
-        self.assertIn("app.js?v=9", home_html)
+        self.assertIn("app.js?v=10", home_html)
         new_board = re.search(r'href="([^"]+/boards/new)"', home_html).group(1)
         form = self.client.get(new_board)
         token = _csrf(form.get_data(as_text=True))

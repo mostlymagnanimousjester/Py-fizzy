@@ -2539,17 +2539,19 @@
       }
     }
 
+    const deleteDialog = document.querySelector(".delete-card dialog[open]");
+    if (deleteDialog && key === "Enter" && !typing(event) && !meta && !event.altKey) {
+      const form = deleteDialog.querySelector("form[data-native-submit]");
+      if (form) {
+        event.preventDefault();
+        if (form.requestSubmit) form.requestSubmit();
+        else form.submit();
+        return;
+      }
+    }
+
     const openDialog = dialogOpen ? document.querySelector("dialog[open]") : null;
     if (openDialog && !typing(event) && !meta && !event.altKey) {
-      if (key === "Enter" && openDialog.closest(".delete-card")) {
-        const form = openDialog.querySelector("form[data-native-submit]");
-        if (form) {
-          event.preventDefault();
-          if (form.requestSubmit) form.requestSubmit();
-          else form.submit();
-          return;
-        }
-      }
       if ((key === "n" || key === "N") && openDialog === barModal) {
         event.preventDefault();
         showSearchHit(key === "N" ? -1 : 1);
