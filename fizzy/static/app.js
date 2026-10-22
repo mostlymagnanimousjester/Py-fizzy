@@ -644,6 +644,8 @@
   }
 
   let navToken = 0;
+  let composeAfterBoard = false;
+  let skipNextCapture = false;
 
   function surfaceUrl(url) {
     let parsed;
@@ -679,6 +681,8 @@
   }
 
   function bootSurface(selectNumber, hash) {
+    const compose = composeAfterBoard;
+    composeAfterBoard = false;
     watchCardLists(document.getElementById("board-stage"));
     watchCardLists(document.getElementById("cards_container"));
     bindSurfaceFilters();
@@ -697,6 +701,7 @@
           selectCard(card);
         }
       }
+      if (compose) openComposer();
       return;
     }
     if (hash === "#edit") {
@@ -786,6 +791,10 @@
   }
 
   function captureSurface() {
+    if (skipNextCapture) {
+      skipNextCapture = false;
+      return;
+    }
     if (boardPreview) return;
     if (!currentKey || !surfaceUrl(window.location.href)) return;
     const snap = takeSnapshot();
@@ -812,13 +821,17 @@
     captureSurface();
   }
 
-  function fetchHtml(url) {
+  function fetchHtml(url, options) {
+    options = options || {};
     const key = cacheKey(url);
-    const pending = inflightHtml.get(key);
-    if (pending) return pending;
+    if (!options.fresh) {
+      const pending = inflightHtml.get(key);
+      if (pending) return pending;
+    }
     const job = fetch(new URL(url, window.location.href).href, {
       headers: { Accept: "text/html" },
       credentials: "same-origin",
+      cache: options.fresh ? "no-store" : "default",
     }).then(function (response) {
       if (!response.ok) {
         const error = new Error("fetch");
@@ -830,9 +843,9 @@
         return { html: html, url: response.url || url };
       });
     }).finally(function () {
-      inflightHtml.delete(key);
+      if (!options.fresh) inflightHtml.delete(key);
     });
-    inflightHtml.set(key, job);
+    if (!options.fresh) inflightHtml.set(key, job);
     return job;
   }
 
@@ -942,7 +955,8 @@
     }
     const key = cacheKey(requested.href);
     const display = requested.pathname + requested.search + requested.hash;
-    const cached = surfaceCache.get(key);
+    const preferFresh = !!(options.fresh || composeAfterBoard);
+    const cached = preferFresh ? null : surfaceCache.get(key);
     let painted = false;
     let paintOptions = options;
     if (cached && cached.main) {
@@ -955,7 +969,7 @@
       if (!cached.dirty) return Promise.resolve(true);
       paintOptions = Object.assign({}, options, { push: false, revalidateStamp: stamp });
     }
-    return fetchHtml(requested.href).then(function (result) {
+    return fetchHtml(requested.href, { fresh: preferFresh }).then(function (result) {
       if (token !== navToken || !result) return null;
       const snap = snapshotFromHtml(result.html);
       const finalUrl = new URL(result.url || requested.href, window.location.href);
@@ -975,6 +989,7 @@
       if (!applySnapshot(snap, finalDisplay, paintOptions) && !painted) window.location.assign(finalUrl.href);
       return true;
     }).catch(function () {
+      composeAfterBoard = false;
       if (token === navToken && !painted) window.location.assign(requested.href);
     });
   }
@@ -1340,6 +1355,10 @@
           else dialog.show();
           const field = dialog.querySelector("input, textarea, select");
           if (field) field.focus();
+          else if (dialog.closest(".delete-card")) {
+            const confirm = dialog.querySelector("button[type='submit']");
+            if (confirm) confirm.focus();
+          }
         }
       }
       return;
@@ -1911,9 +1930,16 @@
         }
         return response.json();
       }).then(function (payload) {
+        if (form.dataset.saveNext === "1") {
+          delete form.dataset.saveNext;
+          if (payload) reopenComposer();
+          else if (undoStage) undoStage();
+          return;
+        }
         if (payload) applyCardSheet(payload);
         else if (undoStage) undoStage();
       }, function () {
+        delete form.dataset.saveNext;
         if (undoStage) undoStage();
         window.alert("Could not update that card.");
       }).then(releaseSubmit, releaseSubmit);
@@ -1921,12 +1947,14 @@
     if (pending) {
       saveCardFields(edit).then(function (ok) {
         if (!ok) {
+          delete form.dataset.saveNext;
           window.alert("Could not save the card before that change.");
           releaseSubmit();
           return;
         }
         send();
       }, function () {
+        delete form.dataset.saveNext;
         releaseSubmit();
       });
       return;
@@ -1962,9 +1990,11 @@
     ["; ,", "Repeat the last f or F forward or backward."],
     ["dd", "Done. 3dd closes this card and the two below it."],
     ["dn", "Not now. Same count as dd."],
+    ["dx", "Delete the selected card."],
     [".", "Repeat the last dd or dn on the selected card."],
     ["o", "Add a card in Maybe."],
     ["Enter", "Create the new card from its title."],
+    ["Ctrl/Cmd Enter", "Save and next. Create the card and open another new card in this column."],
     ["i", "Edit the title. From a board, open the card first."],
     ["/", "Search."],
     ["n N", "Next or previous search hit."],
@@ -2159,14 +2189,66 @@
     if (composer && composer.requestSubmit) composer.requestSubmit();
   }
 
-  function submitNewCard(field) {
+  function submitNewCard(field, next) {
     const title = (field.value || "").trim();
     if (!title) return;
     const create = document.querySelector(".card-perma__notch-new-card-buttons form");
     if (!create || create.dataset.submitting === "1") return;
     create.dataset.submitting = "1";
+    if (next) create.dataset.saveNext = "1";
+    else delete create.dataset.saveNext;
     if (create.requestSubmit) create.requestSubmit();
     else create.submit();
+  }
+
+  function reopenComposer() {
+    const home = boardUrl();
+    if (!home) return;
+    const number = (window.location.pathname.match(/\/cards\/(\d+)\/?$/) || [])[1];
+    if (number) markDirtyUrl(slug + "/cards/" + number);
+    markDirtyUrl(home);
+    composeAfterBoard = true;
+    skipNextCapture = true;
+    openSurface(home);
+  }
+
+  function deleteSelected() {
+    if (onCardPage()) {
+      const opener = document.querySelector(".delete-card [data-dialog-open]");
+      if (opener) opener.click();
+      return;
+    }
+    const card = selectedCard();
+    if (!card || !card.dataset.number || !slug) return;
+    const number = card.dataset.number;
+    const source = card.closest("section.cards");
+    const siblings = source ? visibleCards(source) : [];
+    const index = siblings.indexOf(card);
+    const successor = index >= 0 ? (siblings[index + 1] || siblings[index - 1] || null) : null;
+    const removed = detachCard(card);
+    selectAfterMove(source, successor);
+    const selectionMark = selectionEpoch;
+    const body = new FormData();
+    body.append("csrf_token", csrf);
+    body.append("_method", "delete");
+    fetch(slug + "/cards/" + number, {
+      method: "POST",
+      body: body,
+      credentials: "same-origin",
+    }).then(function (response) {
+      if (!response.ok) {
+        if (removed) removed.undo();
+        window.alert("Could not delete that card.");
+        if (selectionEpoch === selectionMark) chooseFallback();
+        return;
+      }
+      noteMutation(number);
+      if (selectionEpoch === selectionMark) selectAfterMove(source, successor);
+    }, function () {
+      if (removed) removed.undo();
+      window.alert("Could not delete that card.");
+      if (selectionEpoch === selectionMark) chooseFallback();
+    });
   }
 
   function editTitle() {
@@ -2291,6 +2373,10 @@
     if (kind === "d") {
       if (key === "d") runLineAction("done", takeCount());
       else if (key === "n") runLineAction("notnow", takeCount());
+      else if (key === "x" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        dropCount();
+        deleteSelected();
+      }
       else dropCount();
       return;
     }
@@ -2401,7 +2487,7 @@
     if (meta && key === "Enter") {
       if (event.target.matches && event.target.matches("[data-new-card-title]")) {
         event.preventDefault();
-        if (!event.repeat && !event.isComposing) submitNewCard(event.target);
+        if (!event.repeat && !event.isComposing) submitNewCard(event.target, true);
         return;
       }
       const form = event.target.closest && event.target.closest("form");
@@ -2455,6 +2541,15 @@
 
     const openDialog = dialogOpen ? document.querySelector("dialog[open]") : null;
     if (openDialog && !typing(event) && !meta && !event.altKey) {
+      if (key === "Enter" && openDialog.closest(".delete-card")) {
+        const form = openDialog.querySelector("form[data-native-submit]");
+        if (form) {
+          event.preventDefault();
+          if (form.requestSubmit) form.requestSubmit();
+          else form.submit();
+          return;
+        }
+      }
       if ((key === "n" || key === "N") && openDialog === barModal) {
         event.preventDefault();
         showSearchHit(key === "N" ? -1 : 1);

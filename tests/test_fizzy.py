@@ -827,7 +827,7 @@ class ApiTests(unittest.TestCase):
         home = self.client.get("/", follow_redirects=True)
         home_html = home.get_data(as_text=True)
         self.assertEqual(home.status_code, 200, home_html)
-        self.assertIn("app.js?v=8", home_html)
+        self.assertIn("app.js?v=9", home_html)
         new_board = re.search(r'href="([^"]+/boards/new)"', home_html).group(1)
         form = self.client.get(new_board)
         token = _csrf(form.get_data(as_text=True))
@@ -859,7 +859,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(script.status_code, 200)
         source = script.get_data(as_text=True)
         self.assertIn("Create the new card from its title.", source)
+        self.assertIn("Save and next. Create the card and open another new card in this column.", source)
+        self.assertIn('["dx", "Delete the selected card."]', source)
+        self.assertIn('["dd", "Done. 3dd closes this card and the two below it."]', source)
         self.assertIn("data-new-card-title", source)
+        self.assertIn("submitNewCard(event.target, true)", source)
 
 
 class SwapTests(unittest.TestCase):
