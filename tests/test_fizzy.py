@@ -823,11 +823,59 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("Your code is", home_html)
 
 
+    def test_one_user_can_pin_several_cards(self):
+        created = self.request("get", "/")
+        slug = created.get_json()["slug"]
+        token = self.request(
+            "post",
+            "/my/access_tokens",
+            json={"access_token": {"description": "pins", "permission": "write"}},
+        ).get_json()["token"]
+        board = self.request(
+            "post",
+            f"{slug}/boards.json",
+            token,
+            json={"board": {"name": "Pins", "all_access": True}},
+        ).get_json()
+        first = self.request(
+            "post",
+            f"{slug}/boards/{board['id']}/cards.json",
+            token,
+            json={"card": {"title": "Alpha"}},
+        ).get_json()["number"]
+        second = self.request(
+            "post",
+            f"{slug}/boards/{board['id']}/cards.json",
+            token,
+            json={"card": {"title": "Beta"}},
+        ).get_json()["number"]
+        self.assertEqual(self.request("post", f"{slug}/cards/{first}/pin.json", token).status_code, 204)
+        self.assertEqual(self.request("post", f"{slug}/cards/{second}/pin.json", token).status_code, 204)
+        pinned = self.request("get", f"{slug}/my/pins.json", token).get_json()
+        self.assertEqual({card["number"] for card in pinned}, {first, second})
+
+        board_html = self.client.get(f"{slug}/boards/{board['id']}").get_data(as_text=True)
+        self.assertEqual(board_html.count("tray__item--pin"), 2)
+        csrf = _csrf(board_html)
+        fragment = self.client.post(
+            f"{slug}/cards/{first}/pin",
+            data={"csrf_token": csrf, "_method": "delete"},
+            headers={"X-Fizzy-Fragment": "card"},
+        )
+        self.assertEqual(fragment.status_code, 200, fragment.get_data(as_text=True))
+        body = fragment.get_json()
+        self.assertNotIn("data-pinned", body["html"])
+        self.assertIn("Beta", body["pinsHtml"])
+        self.assertNotIn("Alpha", body["pinsHtml"])
+        self.assertEqual(body["pinsHtml"].count("tray__item--pin"), 1)
+        remaining = self.request("get", f"{slug}/my/pins.json", token).get_json()
+        self.assertEqual([card["number"] for card in remaining], [second])
+
     def test_draft_card_title_is_the_keyboard_create_target(self):
         home = self.client.get("/", follow_redirects=True)
         home_html = home.get_data(as_text=True)
         self.assertEqual(home.status_code, 200, home_html)
-        self.assertIn("app.js?v=10", home_html)
+        self.assertIn("app.js?v=11", home_html)
         new_board = re.search(r'href="([^"]+/boards/new)"', home_html).group(1)
         form = self.client.get(new_board)
         token = _csrf(form.get_data(as_text=True))

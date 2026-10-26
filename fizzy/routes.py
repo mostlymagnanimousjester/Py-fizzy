@@ -934,20 +934,25 @@ def _card_page_context(card, board):
     }
 
 
+def _pins_tray_html() -> str:
+    """Every pin for this person, newest first. The tray shows the same set a reload would."""
+    views = [
+        card_view(conn(), card, g.user["id"])
+        for card in store.pins_for_user(conn(), g.user)[:8]
+    ]
+    return render_template("_pin_items.html", tray_pins=views)
+
+
 def _card_sheet_response(number, anchor=""):
     card, board = require_card(number)
     html = render_template("_card_sheet.html", **_card_page_context(card, board))
-    pins = [
-        {"number": row["number"], "title": row["title"] or "Untitled"}
-        for row in store.pins_for_user(conn(), g.user)[:8]
-    ]
     return json_body({
         "html": html,
         "title": f"{card['title'] or 'Card'} · Fizzy",
         "boardName": board["name"],
         "boardUrl": f"{g.slug}/boards/{board['id']}",
         "anchor": anchor,
-        "pins": pins,
+        "pinsHtml": _pins_tray_html(),
     })
 
 
@@ -1014,7 +1019,7 @@ def _activity_days(events):
     return days
 
 
-def _card_fragment(card, stay: bool):
+def _card_fragment(card, stay: bool, *, pins: bool = False):
     view = card_view(conn(), card, g.user["id"])
     if view["closed"]:
         lane = "closed"
@@ -1025,7 +1030,10 @@ def _card_fragment(card, stay: bool):
     else:
         lane = "maybe"
     html = render_template("_card.html", view=view)
-    return json_body({"html": html, "lane": lane, "number": card["number"], "stay": stay})
+    payload = {"html": html, "lane": lane, "number": card["number"], "stay": stay}
+    if pins:
+        payload["pinsHtml"] = _pins_tray_html()
+    return json_body(payload)
 
 
 def _card_action(slug, number, work):
@@ -1045,7 +1053,7 @@ def _card_action(slug, number, work):
         fresh = store.card_by_id(conn(), card["id"])
         path = request.path.rstrip("/")
         stay = path.endswith("/self_assignment") or path.endswith("/goldness") or path.endswith("/pin") or path.endswith("/watch") or path.endswith("/taggings") or path.endswith("/assignments")
-        return _card_fragment(fresh, stay)
+        return _card_fragment(fresh, stay, pins=path.endswith("/pin"))
     return redirect(request.referrer or f"{g.slug}/cards/{number}")
 
 

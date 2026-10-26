@@ -119,11 +119,7 @@
       </div>
       <section class="tray tray--pins">
         <dialog class="tray__dialog" id="pins-tray">
-          {% for view in tray_pins %}
-          <div class="tray__item tray__item--pin">
-            {% include "_card.html" %}
-          </div>
-          {% endfor %}
+          {% include "_pin_items.html" %}
         </dialog>
         <button type="button" class="tray__toggle" data-hotkey="p" aria-controls="pins-tray" aria-label="Toggle pins stack">
           <div class="tray__toggle-btn txt-uppercase btn btn--reversed txt-x-small center full-width">
@@ -173,6 +169,6 @@
     <div data-keymap></div>
   </dialog>
   {% endif %}
-  <script src="{{ url_for('static', filename='app.js', v=10) }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v=11) }}"></script>
 </body>
 </html>

@@ -565,6 +565,26 @@
     return { url: url, fields: fields };
   }
 
+  function paintPins(html) {
+    const tray = document.getElementById("pins-tray");
+    if (!tray) return;
+    tray.innerHTML = html;
+  }
+
+  function dropUnpinnedFromPinsPage(payload) {
+    const path = window.location.pathname.replace(/\/$/, "");
+    if (!path.endsWith("/my/pins") || !payload || payload.number == null) return;
+    const grid = document.querySelector("#main .card-grid");
+    if (!grid) return;
+    const card = grid.querySelector('article.card[data-number="' + payload.number + '"]');
+    if (card && !card.hasAttribute("data-pinned")) card.remove();
+    if (grid.querySelector("article.card")) return;
+    const note = document.createElement("p");
+    note.className = "empty";
+    note.textContent = "Pin a card from its page when you want it close at hand.";
+    grid.replaceWith(note);
+  }
+
   function placeCard(payload) {
     invalidateLists();
     const template = document.createElement("template");
@@ -634,6 +654,8 @@
         return response.json().then(function (payload) {
           const current = !move || moveIsCurrent(move.number, move.epoch);
           if (current && payload && payload.html) placeCard(payload);
+          if (current && payload && typeof payload.pinsHtml === "string") paintPins(payload.pinsHtml);
+          if (current && payload && typeof payload.pinsHtml === "string") dropUnpinnedFromPinsPage(payload);
           if (current && payload) noteMutation((payload && payload.number) || (move && move.number));
           return payload;
         });
@@ -1698,12 +1720,7 @@
       if (label) label.textContent = name ? "Back to " + name : label.textContent;
       else if (name) back.textContent = name;
     }
-    const tray = document.getElementById("pins-tray");
-    if (tray && payload.pins) {
-      tray.innerHTML = payload.pins.map(function (pin) {
-        return '<div class="tray__item tray__item--pin"><a class="card" href="' + slug + "/cards/" + pin.number + '" style="--card-color: var(--color-card-2)"><div class="card__body"><h3 class="card__title">' + escapeHtml(pin.title) + "</h3></div></a></div>";
-      }).join("");
-    }
+    if (typeof payload.pinsHtml === "string") paintPins(payload.pinsHtml);
     const number = (window.location.pathname.match(/\/cards\/(\d+)\/?$/) || [])[1];
     noteMutation(payload.number || number);
     if (payload.anchor) {
